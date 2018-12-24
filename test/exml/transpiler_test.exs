@@ -1,6 +1,7 @@
 defmodule ExMLTranspilerTest do
   use ExUnit.Case
 
+  @tag :skip
   test "static html" do
     html = "<h2>New Template</h2>\n"
     assert_transpiled(html, html)
