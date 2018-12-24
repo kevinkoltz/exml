@@ -1,6 +1,11 @@
-# Exml
+# ExML
 
 **TODO: Add description**
+
+## Goals
+
+* Support pattern matching in expressions
+* Add `<cfunless>`
 
 ## Installation
 
@@ -19,3 +24,6 @@ Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_do
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at [https://hexdocs.pm/exml](https://hexdocs.pm/exml).
 
+## License
+
+"ExML" is released under the [Apache 2 License](LICENSE)
