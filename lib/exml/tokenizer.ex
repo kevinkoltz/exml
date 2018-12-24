@@ -91,6 +91,96 @@ defmodule ExML.Tokenizer.Attribute do
   end
 end
 
+defmodule ExML.Tokenizer.Tag do
+  import NimbleParsec
+  import ExML.Tokenizer.Helpers
+
+  alias ExML.Tokenizer.Attribute
+
+  @type combinator :: NimbleParsec.t()
+
+  # TODO: add doctests and document tag usage
+
+  ### <cfloop list="#books#" item="book">#book#</cfloop>
+  def cfloop_list do
+    attributes = [
+      Attribute.parse("list", value_parsers: [:interpolation]),
+      Attribute.parse("item", value_parsers: [:variable])
+    ]
+
+    parse_tag("cfloop", :cfloop_list, attributes)
+  end
+
+  ### <cfloop from="1" to="10" index="i">#i#</cfloop>
+  ### <cfloop from="#min#" to="#max#" index="i">#i#</cfloop>
+  def cfloop_range do
+    attributes = [
+      Attribute.parse("from", value_parsers: [:integer, :interpolation]),
+      Attribute.parse("to", value_parsers: [:integer, :interpolation]),
+      Attribute.parse("index", value_parsers: [:variable])
+    ]
+
+    parse_tag("cfloop", :cfloop_range, attributes)
+  end
+
+  ### <cfloop query="#books#">#books.title#</cfloop>
+  ### <cfloop query="#books#" startRow="5" endRow="10">#books.title#</cfloop>
+  ### Legacy support:
+  ### <cfloop query="books">#books.title#</cfloop>
+  def cfloop_query do
+    attributes = [
+      # cfquery allows implicit variable interpolation, but this also adds normal interpolation for consistency
+      Attribute.parse("query", value_parsers: [:variable, :interpolation]),
+      Attribute.parse("start_row",
+        value_parsers: [:integer, :interpolation],
+        allow_pascal_case: true
+      ),
+      Attribute.parse("end_row",
+        value_parsers: [:integer, :interpolation],
+        allow_pascal_case: true
+      )
+    ]
+
+    parse_tag("cfloop", :cfloop_query, attributes)
+  end
+
+  def cfif do
+    ignore(string("<cfif"))
+    |> optional(ignore(whitespace()))
+    |> parsec(:expression)
+    |> ignore(string(">"))
+    |> parsec(:parse)
+    |> ignore(string("</cfif>"))
+    |> tag(:cfif)
+  end
+
+  def cfelse do
+    ignore(string("<cfelse>"))
+    |> repeat(lookahead_not(string("</cfif>")) |> parsec(:parse))
+    |> tag(:cfelse)
+  end
+
+  def cfelseif do
+    ignore(string("<cfelseif"))
+    |> optional(ignore(whitespace()))
+    |> parsec(:expression)
+    |> ignore(string(">"))
+    |> repeat(lookahead_not(string("</cfif>")) |> parsec(:parse))
+    |> tag(:cfelseif)
+  end
+
+  @spec parse_tag(String.t(), Atom.t(), [attribute :: combinator]) :: combinator
+  def parse_tag(name, tag, attributes) do
+    ignore(string("<#{name}"))
+    |> ignore(whitespace())
+    |> repeat(choice([ignore(whitespace()) | attributes]))
+    |> ignore(string(">"))
+    |> parsec(:parse)
+    |> ignore(string("</#{name}>"))
+    |> tag(tag)
+  end
+end
+
 defmodule ExML.Tokenizer do
   @moduledoc """
   Parses ExML into tokens which are later used for compilation.
@@ -100,6 +190,7 @@ defmodule ExML.Tokenizer do
   import ExML.Tokenizer.Helpers
 
   alias ExML.Tokenizer.Attribute
+  alias ExML.Tokenizer.Tag
 
   # TODO: check if other unicode characters are allowed
   # TODO: explicitly split variable up by scope (e.g. {scope: "books", variable: "title"})
@@ -142,71 +233,6 @@ defmodule ExML.Tokenizer do
     |> reduce({Enum, :join, []})
     |> unwrap_and_tag(:comment)
 
-  # TODO: put attribute parsers into a function
-
-  ### <cfloop list="#books#" item="book">#book#</cfloop>
-
-  cfloop_list =
-    ignore(string("<cfloop"))
-    |> ignore(whitespace())
-    |> repeat(
-      choice([
-        ignore(whitespace()),
-        Attribute.parse("list", value_parsers: [:interpolation]),
-        Attribute.parse("item", value_parsers: [:variable])
-      ])
-    )
-    |> ignore(string(">"))
-    |> parsec(:parse)
-    |> ignore(string("</cfloop>"))
-    |> tag(:cfloop_list)
-
-  ### <cfloop from="1" to="10" index="i">#i#</cfloop>
-  ### <cfloop from="#min#" to="#max#" index="i">#i#</cfloop>
-
-  cfloop_range =
-    ignore(string("<cfloop"))
-    |> optional(ignore(whitespace()))
-    |> repeat(
-      choice([
-        ignore(whitespace()),
-        Attribute.parse("from", value_parsers: [:integer, :interpolation]),
-        Attribute.parse("to", value_parsers: [:integer, :interpolation]),
-        Attribute.parse("index", value_parsers: [:variable])
-      ])
-    )
-    |> ignore(string(">"))
-    |> parsec(:parse)
-    |> ignore(string("</cfloop>"))
-    |> tag(:cfloop_range)
-
-  ### <cfloop query="books">#books.title#</cfloop>
-  ### <cfloop query="#books#">#books.title#</cfloop>
-  ### <cfloop query="#books#" startRow="5" endRow="10">#books.title#</cfloop>
-
-  cfloop_query =
-    ignore(string("<cfloop"))
-    |> optional(ignore(whitespace()))
-    |> repeat(
-      choice([
-        ignore(whitespace()),
-        # cfquery allows implicit variable interpolation, but this also adds normal interpolation for consistency
-        Attribute.parse("query", value_parsers: [:variable, :interpolation]),
-        Attribute.parse("start_row",
-          value_parsers: [:integer, :interpolation],
-          allow_pascal_case: true
-        ),
-        Attribute.parse("end_row",
-          value_parsers: [:integer, :interpolation],
-          allow_pascal_case: true
-        )
-      ])
-    )
-    |> ignore(string(">"))
-    |> parsec(:parse)
-    |> ignore(string("</cfloop>"))
-    |> tag(:cfloop_query)
-
   defcombinatorp(
     :expression,
     choice([
@@ -218,36 +244,6 @@ defmodule ExML.Tokenizer do
     ])
     |> unwrap_and_tag(:expression)
   )
-
-  cfif =
-    ignore(string("<cfif"))
-    |> optional(ignore(whitespace()))
-    |> parsec(:expression)
-    |> ignore(string(">"))
-    |> parsec(:parse)
-    |> ignore(string("</cfif>"))
-    |> tag(:cfif)
-
-  cfelse =
-    ignore(string("<cfelse>"))
-    |> repeat(lookahead_not(string("</cfif>")) |> parsec(:parse))
-    |> tag(:cfelse)
-
-  cfelseif =
-    ignore(string("<cfelseif"))
-    |> optional(ignore(whitespace()))
-    |> parsec(:expression)
-    |> ignore(string(">"))
-    |> repeat(lookahead_not(string("</cfif>")) |> parsec(:parse))
-    |> tag(:cfelseif)
-
-  # defcombinatorp(
-  #   :xml,
-  #   opening_tag
-  #   |> repeat(lookahead_not(string("</")) |> choice([parsec(:xml), text]))
-  #   |> concat(closing_tag)
-  #   |> wrap()
-  # )
 
   defcombinatorp(
     :static_text,
@@ -283,12 +279,12 @@ defmodule ExML.Tokenizer do
     choice([
       comment,
       parsec(:interpolation),
-      cfif,
-      cfelseif,
-      cfelse,
-      cfloop_list,
-      cfloop_range,
-      cfloop_query
+      Tag.cfif(),
+      Tag.cfelseif(),
+      Tag.cfelse(),
+      Tag.cfloop_list(),
+      Tag.cfloop_range(),
+      Tag.cfloop_query()
     ])
   )
 
