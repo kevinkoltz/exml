@@ -31,9 +31,8 @@ defmodule ExML.CFScript.ParserTest do
                {:call,
                 {:member,
                  {:call,
-                  {:member,
-                   {:binop, "&", {:member, {:var, "arguments"}, "value"}, {:lit, ""}}, "trim"},
-                  []}, "len"}, []}
+                  {:member, {:binop, "&", {:member, {:var, "arguments"}, "value"}, {:lit, ""}},
+                   "trim"}, []}, "len"}, []}
     end
 
     test "not / or precedence" do

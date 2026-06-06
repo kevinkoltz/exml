@@ -18,7 +18,10 @@ defmodule ExML.CFScript.ValueTest do
     end
 
     test "complex values raise, as Lucee does" do
-      assert_raise ExML.CFScript.CFException, ~r/Struct to String/, fn -> Value.to_str(%{"a" => 1}) end
+      assert_raise ExML.CFScript.CFException, ~r/Struct to String/, fn ->
+        Value.to_str(%{"a" => 1})
+      end
+
       assert_raise ExML.CFScript.CFException, ~r/Array to String/, fn -> Value.to_str([1, 2]) end
     end
   end

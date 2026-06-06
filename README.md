@@ -37,23 +37,58 @@ and parses CFCs **function-by-function**, skipping (with a logged warning) any
 function using cfscript features not yet supported — so unsupported siblings
 don't sink a component.
 
-### Supported so far
+### Language features
 
 Components and function declarations (incl. `static`, return types,
 `localmode`), `if`/`else`, `return`, `var`, assignments, the full operator set
 (`&`, comparisons, `and`/`or`/`not`, arithmetic), member access (`a.b`), static
-calls (`cfc.x::y()`), instance/method dispatch, `new`, string member functions
-(`s.trim()`), anonymous-function closures, and a starter set of BIFs (`len`,
-`ucase`, `left`, `right`, `mid`, `trim`, `structKeyExists`, `isNull`,
-`isSimpleValue`, `findNoCase`, `refind`, ...).
+calls (`cfc.x::y()`), instance/method dispatch, `new`, array literals `[…]`,
+struct literals `{k: v}`, anonymous-function closures, and member functions on
+strings/arrays/structs (`s.trim()`, `a.map(fn)`, `s.keyExists(k)`).
+
+### Built-in functions
+
+BIFs are organized into families behind the `ExML.CFScript.BIF` behaviour,
+aggregated by `ExML.CFScript.BIF.Registry`. They are ported 1:1 from the
+Lucee 6.2.5 sources and scoped to what the Signal repo actually uses:
+
+* **String** — `len`, `ucase`, `lcase`, `ucfirst`, `left`, `right`, `mid`,
+  `trim`, `ltrim`, `rtrim`, `find`, `findNoCase`, `reFind`, `reverse`,
+  `repeatString`, `val`
+* **Decision** — `isNull`, `isNumeric`, `isBoolean`, `isSimpleValue`,
+  `isArray`, `isStruct`, `isEmpty`, `isDefined`, `isObject`, `isQuery`
+* **List** (delimited strings) — `listLen`, `listFind`, `listFindNoCase`,
+  `listContains`, `listAppend`, `listPrepend`, `listToArray`, `listGetAt`,
+  `listFirst`, `listLast`, `listRest`
+* **Array** — `arrayLen`, `arrayNew`, `arrayIsEmpty`, `arrayAppend`,
+  `arrayPrepend`, `arrayToList`, `arrayFind(NoCase)`, `arrayContains`,
+  `arraySlice`, `arrayReverse`, `arrayFirst`, `arrayLast`, `arraySum`,
+  `arrayAvg`, `arrayMax`, `arrayMin`
+* **Struct** — `structKeyExists`, `structNew`, `structCount`, `structIsEmpty`,
+  `structKeyArray`, `structKeyList`, `structInsert`, `structAppend`,
+  `structDelete`, `structUpdate`, `structCopy`
+* **Higher-order** (`ExML.CFScript.HigherOrder`, take UDF callbacks) —
+  `arrayMap/Filter/Reduce/Each/Some/Every` and `structEach/Map/Filter/Reduce`
+
+Lucee nuances are matched exactly and covered by tests, e.g. `left/right` error
+on count 0 and return the whole string when `abs(count) >= length`; `val`
+follows `ValNumber.getPos`; lists ignore empty elements by default; `isBoolean`
+rejects numbers; string→boolean coercion throws for `""`.
+
+### Null support
+
+`isNull`/missing-key behavior follows Lucee's full-null-support setting via a
+`Context.null_support` flag (and `:null_support` Runner option). It defaults to
+**off**, matching Signal: reading a missing struct/scope key raises rather than
+yielding null.
 
 ## Goals / roadmap
 
-* Array and struct literals, `for`/`for-in`/`while` loops, ternary, `assert_throws`
+* Reference-type mutation semantics for arrays/structs (in-place `arrayAppend`)
+* `for`/`for-in`/`while` loops, `switch`, ternary, `assert_throws`, `<cfquery>`
   (needed to run the larger monolithic specs end-to-end)
 * Statement-level parse recovery (skip an unsupported statement, keep the rest)
-* Support pattern matching in expressions
-* Add `<cfunless>`
+* Date/query function families
 
 ## Installation
 

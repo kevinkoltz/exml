@@ -54,7 +54,9 @@ defmodule ExML.CFScript.NullSupportTest do
   end
 
   test "existing keys still read in both modes" do
-    body = ~s|describe("g", function() { it("reads", function() { s = {a: 1}; assert_equal(s.a, 1); }); });|
+    body =
+      ~s|describe("g", function() { it("reads", function() { s = {a: 1}; assert_equal(s.a, 1); }); });|
+
     assert run(body, []).passed == 1
     assert run(body, null_support: true).passed == 1
   end

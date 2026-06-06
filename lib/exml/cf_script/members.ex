@@ -46,10 +46,17 @@ defmodule ExML.CFScript.Members do
     down = String.downcase(name)
 
     cond do
-      is_binary(value) -> Registry.call(down, [value | args])
-      is_list(value) -> dispatch(prefix("array", down), value, args, invoke)
-      is_map(value) and not is_struct(value) -> dispatch(prefix("struct", down), value, args, invoke)
-      true -> raise CFException, message: "Cannot call member '#{name}' on #{Value.display(value)}"
+      is_binary(value) ->
+        Registry.call(down, [value | args])
+
+      is_list(value) ->
+        dispatch(prefix("array", down), value, args, invoke)
+
+      is_map(value) and not is_struct(value) ->
+        dispatch(prefix("struct", down), value, args, invoke)
+
+      true ->
+        raise CFException, message: "Cannot call member '#{name}' on #{Value.display(value)}"
     end
   end
 

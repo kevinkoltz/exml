@@ -27,8 +27,29 @@ defmodule ExML.CFScript.Lexer do
   @multi_ops ["==", "!=", "<=", ">=", "&&", "||", "::", "=>", "<>", "++", "--", "+=", "-="]
 
   @single_ops [
-    "&", "=", "+", "-", "*", "/", "%", "^", "<", ">", "!", ".", ",", ";", ":",
-    "(", ")", "{", "}", "[", "]", "?", "@"
+    "&",
+    "=",
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "^",
+    "<",
+    ">",
+    "!",
+    ".",
+    ",",
+    ";",
+    ":",
+    "(",
+    ")",
+    "{",
+    "}",
+    "[",
+    "]",
+    "?",
+    "@"
   ]
 
   @doc "Tokenize `source` into a list of tokens. Raises on unterminated strings."
@@ -84,8 +105,11 @@ defmodule ExML.CFScript.Lexer do
   # Operators / punctuation
   defp do_tokenize(bin, acc) do
     case match_op(bin) do
-      {op, rest} -> do_tokenize(rest, [{:op, op} | acc])
-      :error -> raise "ExML.CFScript.Lexer: unexpected character at #{inspect(String.slice(bin, 0, 20))}"
+      {op, rest} ->
+        do_tokenize(rest, [{:op, op} | acc])
+
+      :error ->
+        raise "ExML.CFScript.Lexer: unexpected character at #{inspect(String.slice(bin, 0, 20))}"
     end
   end
 

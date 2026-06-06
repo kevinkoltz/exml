@@ -24,7 +24,7 @@ defmodule ExML.CFScript.HigherOrder do
 
   @doc "Whether `name` is a higher-order collection function (case-insensitive)."
   @spec higher_order?(String.t()) :: boolean()
-  def higher_order?(name), do: String.downcase(name) in @array_names ++ @struct_names
+  def higher_order?(name), do: String.downcase(name) in (@array_names ++ @struct_names)
 
   @doc "Dispatch a higher-order function by name with `[collection, udf | rest]`."
   @spec call(String.t(), [any()], invoke()) :: any()

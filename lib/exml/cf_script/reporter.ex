@@ -9,7 +9,12 @@ defmodule ExML.CFScript.Reporter do
   """
 
   @type status :: :pass | :fail | :error
-  @type result :: %{status: status(), group: String.t(), description: String.t(), message: String.t() | nil}
+  @type result :: %{
+          status: status(),
+          group: String.t(),
+          description: String.t(),
+          message: String.t() | nil
+        }
 
   @doc "Begin a fresh collection."
   @spec start() :: :ok

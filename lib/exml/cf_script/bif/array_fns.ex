@@ -36,8 +36,12 @@ defmodule ExML.CFScript.BIF.ArrayFns do
 
   # arrayFind: case-sensitive exact match, 1-based index, 0 if absent.
   def call("arrayfind", [arr, value]) when is_list(arr), do: index_of(arr, value, &equal_cs?/2)
-  def call("arrayfindnocase", [arr, value]) when is_list(arr), do: index_of(arr, value, &Value.equals?/2)
-  def call("arraycontains", [arr, value]) when is_list(arr), do: index_of(arr, value, &equal_cs?/2)
+
+  def call("arrayfindnocase", [arr, value]) when is_list(arr),
+    do: index_of(arr, value, &Value.equals?/2)
+
+  def call("arraycontains", [arr, value]) when is_list(arr),
+    do: index_of(arr, value, &equal_cs?/2)
 
   def call("arrayreverse", [arr]) when is_list(arr), do: Enum.reverse(arr)
 
@@ -56,7 +60,9 @@ defmodule ExML.CFScript.BIF.ArrayFns do
 
   # arraySlice(arr, offset[, length]) — Lucee ArraySlice.java (1-based offset;
   # length 0 = to end; negative offset/length count from the end).
-  def call("arrayslice", [arr, offset]) when is_list(arr), do: slice(arr, trunc(Value.to_number(offset)), 0)
+  def call("arrayslice", [arr, offset]) when is_list(arr),
+    do: slice(arr, trunc(Value.to_number(offset)), 0)
+
   def call("arrayslice", [arr, offset, length]) when is_list(arr),
     do: slice(arr, trunc(Value.to_number(offset)), trunc(Value.to_number(length)))
 
@@ -98,7 +104,8 @@ defmodule ExML.CFScript.BIF.ArrayFns do
   defp last(arr), do: List.last(arr)
 
   @spec slice([any()], integer(), integer()) :: [any()]
-  defp slice([], _offset, _len), do: raise(CFException, message: "arraySlice: array cannot be empty")
+  defp slice([], _offset, _len),
+    do: raise(CFException, message: "arraySlice: array cannot be empty")
 
   defp slice(arr, offset, len) do
     size = length(arr)

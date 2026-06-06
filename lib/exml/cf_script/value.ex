@@ -62,8 +62,11 @@ defmodule ExML.CFScript.Value do
   @spec to_number(any()) :: number()
   def to_number(value) do
     case as_number(value) do
-      {:ok, n} -> n
-      :error -> raise ExML.CFScript.CFException, message: "Can't cast [#{display(value)}] to a number"
+      {:ok, n} ->
+        n
+
+      :error ->
+        raise ExML.CFScript.CFException, message: "Can't cast [#{display(value)}] to a number"
     end
   end
 

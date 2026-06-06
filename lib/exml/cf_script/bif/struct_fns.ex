@@ -27,15 +27,21 @@ defmodule ExML.CFScript.BIF.StructFns do
   def call("structcount", [struct]) when is_map(struct), do: map_size(struct)
   def call("structisempty", [struct]) when is_map(struct), do: map_size(struct) == 0
   def call("structkeyarray", [struct]) when is_map(struct), do: Map.keys(struct)
-  def call("structkeylist", [struct]) when is_map(struct), do: struct |> Map.keys() |> Enum.join(",")
+
+  def call("structkeylist", [struct]) when is_map(struct),
+    do: struct |> Map.keys() |> Enum.join(",")
 
   # structInsert(struct, key, value [, allowOverwrite=false]): errors on an
   # existing key unless overwrite is allowed. Value-returning here.
-  def call("structinsert", [struct, k, value]) when is_map(struct), do: insert(struct, k, value, false)
+  def call("structinsert", [struct, k, value]) when is_map(struct),
+    do: insert(struct, k, value, false)
+
   def call("structinsert", [struct, k, value, overwrite]) when is_map(struct),
     do: insert(struct, k, value, Value.truthy?(overwrite))
 
-  def call("structupdate", [struct, k, value]) when is_map(struct), do: Map.put(struct, key(k), value)
+  def call("structupdate", [struct, k, value]) when is_map(struct),
+    do: Map.put(struct, key(k), value)
+
   def call("structdelete", [struct, k]) when is_map(struct), do: Map.delete(struct, key(k))
   def call("structcopy", [struct]) when is_map(struct), do: struct
 

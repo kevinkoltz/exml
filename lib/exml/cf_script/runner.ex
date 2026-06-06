@@ -13,7 +13,12 @@ defmodule ExML.CFScript.Runner do
   alias ExML.CFScript.Value.Native
 
   @type result :: Reporter.result()
-  @type summary :: %{results: [result()], passed: non_neg_integer(), failed: non_neg_integer(), total: non_neg_integer()}
+  @type summary :: %{
+          results: [result()],
+          passed: non_neg_integer(),
+          failed: non_neg_integer(),
+          total: non_neg_integer()
+        }
 
   @doc """
   Run the spec file at `spec_path`.
@@ -140,7 +145,8 @@ defmodule ExML.CFScript.Runner do
     if Value.equals?(actual, expected) do
       raise CFException,
         cf_type: "AssertionError",
-        message: "Expected value to not equal #{Value.display(expected)} but it did" <> suffix(rest)
+        message:
+          "Expected value to not equal #{Value.display(expected)} but it did" <> suffix(rest)
     end
 
     nil

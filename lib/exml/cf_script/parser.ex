@@ -82,7 +82,8 @@ defmodule ExML.CFScript.Parser do
   end
 
   # Component attributes: `extends="..." output="false"` etc, until `{`.
-  @spec parse_component_attrs([Lexer.token()], String.t() | nil) :: {String.t() | nil, [Lexer.token()]}
+  @spec parse_component_attrs([Lexer.token()], String.t() | nil) ::
+          {String.t() | nil, [Lexer.token()]}
   defp parse_component_attrs([{:op, "{"} | _] = tokens, extends), do: {extends, tokens}
 
   defp parse_component_attrs([{:ident, name}, {:op, "="}, {:string, val} | rest], extends) do
@@ -97,7 +98,8 @@ defmodule ExML.CFScript.Parser do
   defp parse_component_attrs(tokens, extends), do: {extends, tokens}
 
   # Parse zero or more member function declarations until `}` or EOF.
-  @spec parse_members([Lexer.token()], [AST.Function.t()]) :: {[AST.Function.t()], [Lexer.token()]}
+  @spec parse_members([Lexer.token()], [AST.Function.t()]) ::
+          {[AST.Function.t()], [Lexer.token()]}
   defp parse_members([], acc), do: {Enum.reverse(acc), []}
   defp parse_members([{:op, "}"} | _] = tokens, acc), do: {Enum.reverse(acc), tokens}
 
@@ -214,7 +216,8 @@ defmodule ExML.CFScript.Parser do
 
   # Collect consecutive identifiers (param type + name) stopping at `,`/`)`/`=`.
   @spec take_leading_idents([Lexer.token()], [String.t()]) :: {[String.t()], [Lexer.token()]}
-  defp take_leading_idents([{:ident, w}, {:op, op} | _] = tokens, acc) when op in ["=", ",", ")"] do
+  defp take_leading_idents([{:ident, w}, {:op, op} | _] = tokens, acc)
+       when op in ["=", ",", ")"] do
     {Enum.reverse([w | acc]), tl(tokens)}
   end
 
@@ -368,7 +371,8 @@ defmodule ExML.CFScript.Parser do
     do: parse_binop_level(tokens, &parse_mult/1, [{"+", "+"}, {"-", "-"}])
 
   defp parse_mult(tokens),
-    do: parse_binop_level(tokens, &parse_unary/1, [{"*", "*"}, {"/", "/"}, {"%", "%"}, {"mod", "%"}])
+    do:
+      parse_binop_level(tokens, &parse_unary/1, [{"*", "*"}, {"/", "/"}, {"%", "%"}, {"mod", "%"}])
 
   defp parse_unary([{:op, "-"} | rest]) do
     {operand, rest} = parse_unary(rest)
@@ -453,9 +457,14 @@ defmodule ExML.CFScript.Parser do
     {arg, rest} = parse_argument(tokens)
 
     case rest do
-      [{:op, ","} | rest2] -> parse_args(rest2, [arg | acc])
-      [{:op, ")"} | rest2] -> {Enum.reverse([arg | acc]), rest2}
-      _ -> raise "ExML.CFScript.Parser: expected ',' or ')' in argument list near #{inspect(rest)}"
+      [{:op, ","} | rest2] ->
+        parse_args(rest2, [arg | acc])
+
+      [{:op, ")"} | rest2] ->
+        {Enum.reverse([arg | acc]), rest2}
+
+      _ ->
+        raise "ExML.CFScript.Parser: expected ',' or ')' in argument list near #{inspect(rest)}"
     end
   end
 
@@ -474,9 +483,14 @@ defmodule ExML.CFScript.Parser do
     {expr, rest} = parse_expr(tokens)
 
     case rest do
-      [{:op, ","} | rest2] -> parse_list_until(rest2, closer, [expr | acc])
-      [{:op, ^closer} | rest2] -> {Enum.reverse([expr | acc]), rest2}
-      _ -> raise "ExML.CFScript.Parser: expected ',' or '#{closer}' near #{inspect(Enum.take(rest, 3))}"
+      [{:op, ","} | rest2] ->
+        parse_list_until(rest2, closer, [expr | acc])
+
+      [{:op, ^closer} | rest2] ->
+        {Enum.reverse([expr | acc]), rest2}
+
+      _ ->
+        raise "ExML.CFScript.Parser: expected ',' or '#{closer}' near #{inspect(Enum.take(rest, 3))}"
     end
   end
 
@@ -492,9 +506,14 @@ defmodule ExML.CFScript.Parser do
     acc = [{key, value} | acc]
 
     case tokens do
-      [{:op, ","} | rest] -> parse_struct_pairs(rest, acc)
-      [{:op, "}"} | rest] -> {Enum.reverse(acc), rest}
-      _ -> raise "ExML.CFScript.Parser: expected ',' or '}' in struct near #{inspect(Enum.take(tokens, 3))}"
+      [{:op, ","} | rest] ->
+        parse_struct_pairs(rest, acc)
+
+      [{:op, "}"} | rest] ->
+        {Enum.reverse(acc), rest}
+
+      _ ->
+        raise "ExML.CFScript.Parser: expected ',' or '}' in struct near #{inspect(Enum.take(tokens, 3))}"
     end
   end
 
@@ -510,7 +529,10 @@ defmodule ExML.CFScript.Parser do
   defp expect_struct_separator([{:op, op} | rest]) when op in [":", "="], do: rest
 
   defp expect_struct_separator(tokens),
-    do: raise("ExML.CFScript.Parser: expected ':' or '=' in struct near #{inspect(Enum.take(tokens, 3))}")
+    do:
+      raise(
+        "ExML.CFScript.Parser: expected ':' or '=' in struct near #{inspect(Enum.take(tokens, 3))}"
+      )
 
   ## Primary expressions
 
@@ -589,7 +611,9 @@ defmodule ExML.CFScript.Parser do
 
   @spec take_ident([Lexer.token()]) :: {String.t(), [Lexer.token()]}
   defp take_ident([{:ident, name} | rest]), do: {name, rest}
-  defp take_ident(tokens), do: raise("ExML.CFScript.Parser: expected identifier near #{inspect(Enum.take(tokens, 3))}")
+
+  defp take_ident(tokens),
+    do: raise("ExML.CFScript.Parser: expected identifier near #{inspect(Enum.take(tokens, 3))}")
 
   @spec expect_ident([Lexer.token()], String.t()) :: [Lexer.token()]
   defp expect_ident([{:ident, w} | rest], expected) do
@@ -599,7 +623,8 @@ defmodule ExML.CFScript.Parser do
   end
 
   defp expect_ident(tokens, expected),
-    do: raise("ExML.CFScript.Parser: expected '#{expected}' near #{inspect(Enum.take(tokens, 3))}")
+    do:
+      raise("ExML.CFScript.Parser: expected '#{expected}' near #{inspect(Enum.take(tokens, 3))}")
 
   @spec expect_op([Lexer.token()], String.t()) :: [Lexer.token()]
   defp expect_op([{:op, op} | rest], op), do: rest

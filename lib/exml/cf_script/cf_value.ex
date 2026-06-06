@@ -115,8 +115,11 @@ defimpl ExML.CFScript.CFValue, for: BitString do
 
   defp numeric_truthy(s) do
     case as_number(s) do
-      {:ok, n} -> n != 0
-      :error -> raise ExML.CFScript.CFException, message: "Can't cast String [#{s}] to a boolean value"
+      {:ok, n} ->
+        n != 0
+
+      :error ->
+        raise ExML.CFScript.CFException, message: "Can't cast String [#{s}] to a boolean value"
     end
   end
 
@@ -143,7 +146,10 @@ end
 
 defimpl ExML.CFScript.CFValue, for: Map do
   # A plain map is a CFML struct. Lucee throws when coercing it to a string.
-  def to_str(_struct), do: raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Struct to String")
+  def to_str(_struct),
+    do:
+      raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Struct to String")
+
   def as_number(_struct), do: :error
   def truthy?(_struct), do: true
   def type_name(_struct), do: :struct
@@ -151,7 +157,10 @@ end
 
 defimpl ExML.CFScript.CFValue, for: List do
   # A list is a CFML array. Lucee throws when coercing it to a string.
-  def to_str(_array), do: raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Array to String")
+  def to_str(_array),
+    do:
+      raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Array to String")
+
   def as_number(_array), do: :error
   def truthy?(_array), do: true
   def type_name(_array), do: :array
@@ -161,14 +170,24 @@ end
 # differ only in the CFML type label they report, so they are grouped by label.
 defimpl ExML.CFScript.CFValue,
   for: [ExML.CFScript.Value.Instance, ExML.CFScript.Value.ComponentType] do
-  def to_str(value), do: raise(ExML.CFScript.CFException, message: "Can't cast #{inspect(value.__struct__)} to String")
+  def to_str(value),
+    do:
+      raise(ExML.CFScript.CFException,
+        message: "Can't cast #{inspect(value.__struct__)} to String"
+      )
+
   def as_number(_value), do: :error
   def truthy?(_value), do: true
   def type_name(_value), do: :component
 end
 
 defimpl ExML.CFScript.CFValue, for: ExML.CFScript.Value.Namespace do
-  def to_str(value), do: raise(ExML.CFScript.CFException, message: "Can't cast #{inspect(value.__struct__)} to String")
+  def to_str(value),
+    do:
+      raise(ExML.CFScript.CFException,
+        message: "Can't cast #{inspect(value.__struct__)} to String"
+      )
+
   def as_number(_value), do: :error
   def truthy?(_value), do: true
   def type_name(_value), do: :namespace
@@ -176,7 +195,12 @@ end
 
 defimpl ExML.CFScript.CFValue,
   for: [ExML.CFScript.Value.Closure, ExML.CFScript.Value.Native] do
-  def to_str(value), do: raise(ExML.CFScript.CFException, message: "Can't cast #{inspect(value.__struct__)} to String")
+  def to_str(value),
+    do:
+      raise(ExML.CFScript.CFException,
+        message: "Can't cast #{inspect(value.__struct__)} to String"
+      )
+
   def as_number(_value), do: :error
   def truthy?(_value), do: true
   def type_name(_value), do: :function

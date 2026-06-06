@@ -50,10 +50,18 @@ defmodule ExML.CFScript.BIF.StringFns do
     len = String.length(s)
 
     cond do
-      n == 0 -> raise CFException, message: "parameter 2 of the function left can not be 0 for the string [#{s}]"
-      abs(n) >= len -> s
-      n < 0 -> String.slice(s, 0, len + n)
-      true -> String.slice(s, 0, n)
+      n == 0 ->
+        raise CFException,
+          message: "parameter 2 of the function left can not be 0 for the string [#{s}]"
+
+      abs(n) >= len ->
+        s
+
+      n < 0 ->
+        String.slice(s, 0, len + n)
+
+      true ->
+        String.slice(s, 0, n)
     end
   end
 
@@ -85,11 +93,13 @@ defmodule ExML.CFScript.BIF.StringFns do
     cond do
       start_idx < 0 ->
         raise CFException,
-          message: "Parameter 2 of function mid which is now [#{start_idx + 1}] must be a positive integer"
+          message:
+            "Parameter 2 of function mid which is now [#{start_idx + 1}] must be a positive integer"
 
       c < -1 ->
         raise CFException,
-          message: "Parameter 3 of function mid which is now [#{c}] must be a non-negative integer or -1 (for string length)"
+          message:
+            "Parameter 3 of function mid which is now [#{c}] must be a non-negative integer or -1 (for string length)"
 
       start_idx > len ->
         ""
@@ -109,20 +119,25 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   ## Searching
 
-  def call("find", [needle, haystack]), do: find_position(Value.to_str(haystack), Value.to_str(needle), 1)
+  def call("find", [needle, haystack]),
+    do: find_position(Value.to_str(haystack), Value.to_str(needle), 1)
 
   def call("find", [needle, haystack, start]),
     do: find_position(Value.to_str(haystack), Value.to_str(needle), trunc(Value.to_number(start)))
 
-  def call("findnocase", [needle, haystack]), do: find_position(downcase(haystack), downcase(needle), 1)
+  def call("findnocase", [needle, haystack]),
+    do: find_position(downcase(haystack), downcase(needle), 1)
 
   def call("findnocase", [needle, haystack, start]),
     do: find_position(downcase(haystack), downcase(needle), trunc(Value.to_number(start)))
 
   # REFind: 1-based position of the first regex match, or 0. The
   # struct-returning (returnsubexpressions=true) form is added when a spec needs it.
-  def call("refind", [pattern, string]), do: regex_position(Value.to_str(pattern), Value.to_str(string))
-  def call("refind", [pattern, string, _start | _]), do: regex_position(Value.to_str(pattern), Value.to_str(string))
+  def call("refind", [pattern, string]),
+    do: regex_position(Value.to_str(pattern), Value.to_str(string))
+
+  def call("refind", [pattern, string, _start | _]),
+    do: regex_position(Value.to_str(pattern), Value.to_str(string))
 
   def call("reescape", [v]), do: Regex.escape(Value.to_str(v))
 
@@ -170,7 +185,8 @@ defmodule ExML.CFScript.BIF.StringFns do
   end
 
   @spec byte_offset_to_char(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp byte_offset_to_char(string, byte_pos), do: string |> binary_part(0, byte_pos) |> String.length()
+  defp byte_offset_to_char(string, byte_pos),
+    do: string |> binary_part(0, byte_pos) |> String.length()
 
   @spec regex_position(String.t(), String.t()) :: non_neg_integer()
   defp regex_position(pattern, string) do
@@ -211,7 +227,8 @@ defmodule ExML.CFScript.BIF.StringFns do
   defp first_is_numeric_start?(nil), do: false
   defp first_is_numeric_start?(c), do: c == "." or (c >= "0" and c <= "9")
 
-  @spec scan_number([String.t()], non_neg_integer(), non_neg_integer(), boolean()) :: non_neg_integer()
+  @spec scan_number([String.t()], non_neg_integer(), non_neg_integer(), boolean()) ::
+          non_neg_integer()
   defp scan_number(_chars, pos, len, _has_dot) when pos >= len, do: pos
 
   defp scan_number(chars, pos, len, has_dot) do

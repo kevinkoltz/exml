@@ -24,7 +24,9 @@ defmodule ExML.CFScript.BIF.StringFnsTest do
     end
 
     test "count of 0 raises" do
-      assert_raise ExML.CFScript.CFException, ~r/can not be 0/, fn -> R.call("left", ["hi", 0]) end
+      assert_raise ExML.CFScript.CFException, ~r/can not be 0/, fn ->
+        R.call("left", ["hi", 0])
+      end
     end
   end
 

@@ -30,13 +30,20 @@ defmodule ExML.CFScript.BIF.ListFns do
   def call("listfind", [list, value]), do: index_of(list, value, @default_delimiter, &==/2)
   def call("listfind", [list, value, delim]), do: index_of(list, value, str(delim), &==/2)
 
-  def call("listfindnocase", [list, value]), do: index_of(list, value, @default_delimiter, &iequals/2)
-  def call("listfindnocase", [list, value, delim]), do: index_of(list, value, str(delim), &iequals/2)
+  def call("listfindnocase", [list, value]),
+    do: index_of(list, value, @default_delimiter, &iequals/2)
 
-  def call("listcontains", [list, value]), do: index_of(list, value, @default_delimiter, &contains/2)
-  def call("listcontains", [list, value, delim]), do: index_of(list, value, str(delim), &contains/2)
+  def call("listfindnocase", [list, value, delim]),
+    do: index_of(list, value, str(delim), &iequals/2)
 
-  def call("listcontainsnocase", [list, value]), do: index_of(list, value, @default_delimiter, &icontains/2)
+  def call("listcontains", [list, value]),
+    do: index_of(list, value, @default_delimiter, &contains/2)
+
+  def call("listcontains", [list, value, delim]),
+    do: index_of(list, value, str(delim), &contains/2)
+
+  def call("listcontainsnocase", [list, value]),
+    do: index_of(list, value, @default_delimiter, &icontains/2)
 
   def call("listappend", [list, value]), do: append(list, value, @default_delimiter)
   def call("listappend", [list, value, delim]), do: append(list, value, str(delim))
@@ -77,7 +84,8 @@ defmodule ExML.CFScript.BIF.ListFns do
     |> Enum.reject(&(&1 == ""))
   end
 
-  @spec index_of(any(), any(), String.t(), (String.t(), String.t() -> boolean())) :: non_neg_integer()
+  @spec index_of(any(), any(), String.t(), (String.t(), String.t() -> boolean())) ::
+          non_neg_integer()
   defp index_of(list, value, delim, match?) do
     target = str(value)
 
@@ -116,8 +124,12 @@ defmodule ExML.CFScript.BIF.ListFns do
     i = trunc(Value.to_number(pos))
 
     case Enum.at(items, i - 1) do
-      nil -> raise CFException, message: "invalid string list index [#{i}], indexes go from 1 to #{length(items)}"
-      element -> element
+      nil ->
+        raise CFException,
+          message: "invalid string list index [#{i}], indexes go from 1 to #{length(items)}"
+
+      element ->
+        element
     end
   end
 
@@ -147,5 +159,6 @@ defmodule ExML.CFScript.BIF.ListFns do
   defp contains(element, value), do: String.contains?(element, value)
 
   @spec icontains(String.t(), String.t()) :: boolean()
-  defp icontains(element, value), do: String.contains?(String.downcase(element), String.downcase(value))
+  defp icontains(element, value),
+    do: String.contains?(String.downcase(element), String.downcase(value))
 end

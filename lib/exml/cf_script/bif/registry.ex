@@ -12,10 +12,10 @@ defmodule ExML.CFScript.BIF.Registry do
 
   @families [StringFns, DecisionFns, ListFns, ArrayFns, StructFns]
 
-  @table (for family <- @families,
-              name <- family.names(),
-              into: %{},
-              do: {name, family})
+  @table for family <- @families,
+             name <- family.names(),
+             into: %{},
+             do: {name, family}
 
   @doc "Whether `name` is a registered BIF (case-insensitive)."
   @spec builtin?(String.t()) :: boolean()
