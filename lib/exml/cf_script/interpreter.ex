@@ -351,15 +351,18 @@ defmodule ExML.CFScript.Interpreter do
     resolve_component_type_by_path("#{base}.#{name}", env.ctx)
   end
 
-  defp eval_member(%Instance{variables: variables}, name, _env) do
+  defp eval_member(%Instance{variables: variables}, name, env) do
     case Scope.fetch(variables, name) do
       {:ok, value} -> value
-      :error -> nil
+      :error -> missing_key(name, env)
     end
   end
 
-  defp eval_member(map, name, _env) when is_map(map) do
-    Map.get(map, String.downcase(name))
+  defp eval_member(map, name, env) when is_map(map) do
+    case Map.fetch(map, String.downcase(name)) do
+      {:ok, value} -> value
+      :error -> missing_key(name, env)
+    end
   end
 
   defp eval_member(other, name, _env) do
@@ -372,8 +375,17 @@ defmodule ExML.CFScript.Interpreter do
   defp read_scope_member(scope_kw, name, env) do
     case Scope.fetch(scope_ref(scope_kw, env), name) do
       {:ok, value} -> value
-      :error -> raise CFException, message: "Key '#{name}' not found in #{scope_kw} scope"
+      :error -> missing_key(name, env)
     end
+  end
+
+  # Honor Lucee's full-null-support setting: with it off (Signal's default),
+  # reading a missing key raises; with it on, it yields null.
+  @spec missing_key(String.t(), Env.t()) :: nil
+  defp missing_key(_name, %Env{ctx: %{null_support: true}}), do: nil
+
+  defp missing_key(name, _env) do
+    raise CFException, message: "key [#{name}] doesn't exist"
   end
 
   # The value of a bare scope keyword (e.g. passing `arguments` to a BIF).

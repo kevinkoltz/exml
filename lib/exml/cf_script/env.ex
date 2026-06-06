@@ -35,8 +35,12 @@ defmodule ExML.CFScript.Context do
   @type t :: %__MODULE__{
           cfc_root: String.t(),
           cache: pid(),
-          natives: %{optional(String.t()) => ExML.CFScript.Value.Native.t()}
+          natives: %{optional(String.t()) => ExML.CFScript.Value.Native.t()},
+          null_support: boolean()
         }
 
-  defstruct cfc_root: nil, cache: nil, natives: %{}
+  # `null_support` mirrors Lucee's "full null support" application/server
+  # setting. Signal runs with it OFF, which is the default here: accessing a
+  # missing struct key or scope variable raises rather than yielding null.
+  defstruct cfc_root: nil, cache: nil, natives: %{}, null_support: false
 end

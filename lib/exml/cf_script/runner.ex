@@ -20,6 +20,8 @@ defmodule ExML.CFScript.Runner do
 
   Options:
     * `:cfc_root` (required) — directory the `cfc.*` mapping resolves against.
+    * `:null_support` (default `false`) — Lucee full-null-support mode. Off (the
+      Signal default) makes missing-key access raise; on yields null.
   """
   @spec run_spec_file(String.t(), keyword()) :: summary()
   def run_spec_file(spec_path, opts) do
@@ -34,7 +36,12 @@ defmodule ExML.CFScript.Runner do
     cfc_root = Keyword.fetch!(opts, :cfc_root)
     {:ok, cache} = Agent.start_link(fn -> %{} end)
 
-    ctx = %Context{cfc_root: cfc_root, cache: cache, natives: build_natives()}
+    ctx = %Context{
+      cfc_root: cfc_root,
+      cache: cache,
+      natives: build_natives(),
+      null_support: Keyword.get(opts, :null_support, false)
+    }
 
     try do
       component = Loader.parse_source(source, label)
