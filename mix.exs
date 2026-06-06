@@ -5,7 +5,7 @@ defmodule ExML.MixProject do
     [
       app: :exml,
       version: "0.1.0",
-      elixir: "~> 1.7",
+      elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       package: package(),
       deps: deps()
@@ -22,9 +22,8 @@ defmodule ExML.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:nimble_parsec, "~> 0.5.0"},
-      {:mix_test_watch, "~> 0.5.0"}
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"},
+      {:nimble_parsec, "~> 1.4"},
+      {:mix_test_watch, "~> 1.2", only: [:dev, :test], runtime: false}
     ]
   end
 
