@@ -29,7 +29,11 @@ defmodule ExML.CFScript.ValueTest do
       assert Value.truthy?("YES")
       refute Value.truthy?("false")
       refute Value.truthy?("no")
-      refute Value.truthy?("")
+    end
+
+    test "empty and non-boolean strings throw, matching Lucee" do
+      assert_raise ExML.CFScript.CFException, fn -> Value.truthy?("") end
+      assert_raise ExML.CFScript.CFException, fn -> Value.truthy?("maybe") end
     end
 
     test "numeric strings and numbers" do

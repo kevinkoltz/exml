@@ -1,9 +1,10 @@
 defmodule ExML.CFScript.BIF.StringFns do
   @moduledoc """
-  CFML string built-in functions, matching Lucee 6.2 semantics.
+  CFML string built-in functions, ported 1:1 from Lucee 6.2.5
+  (`lucee.runtime.functions.string.*` and `lucee.runtime.op.Caster`).
 
-  All names are matched lowercase (the registry downcases before dispatch).
-  Counts/positions are 1-based, as in CFML.
+  Names are matched lowercase (the registry downcases before dispatch);
+  positions and counts are 1-based, as in CFML.
   """
 
   @behaviour ExML.CFScript.BIF
@@ -12,7 +13,7 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   @names ~w(
     len ucase lcase ucfirst left right mid trim ltrim rtrim
-    find findnocase refind reescape val reverse repeatstring
+    find findnocase refind reescape val valnumber reverse repeatstring
   )
 
   @impl true
@@ -37,21 +38,67 @@ defmodule ExML.CFScript.BIF.StringFns do
     end
   end
 
-  ## Substring helpers (1-based; Lucee clamps and supports negative count)
+  ## left / right — Lucee Left.java / Right.java
+  #
+  #   count == 0                -> error
+  #   abs(count) >= length(str) -> whole string
+  #   count < 0                 -> length + count chars (from the relevant end)
 
-  def call("left", [v, count]), do: substring_left(Value.to_str(v), Value.to_number(count))
-  def call("right", [v, count]), do: substring_right(Value.to_str(v), Value.to_number(count))
+  def call("left", [v, count]) do
+    s = Value.to_str(v)
+    n = trunc(Value.to_number(count))
+    len = String.length(s)
+
+    cond do
+      n == 0 -> raise CFException, message: "parameter 2 of the function left can not be 0 for the string [#{s}]"
+      abs(n) >= len -> s
+      n < 0 -> String.slice(s, 0, len + n)
+      true -> String.slice(s, 0, n)
+    end
+  end
+
+  def call("right", [v, count]) do
+    s = Value.to_str(v)
+    n = trunc(Value.to_number(count))
+    len = String.length(s)
+
+    cond do
+      n == 0 -> raise CFException, message: "parameter 2 of the function right can not be 0"
+      abs(n) >= len -> s
+      n < 0 -> String.slice(s, len - (len + n), len + n)
+      true -> String.slice(s, len - n, n)
+    end
+  end
+
+  ## mid — Lucee Mid.java
+  #
+  #   start < 1   -> error; count omitted or -1 -> to end; count < -1 -> error
+
+  def call("mid", [v, start]), do: call("mid", [v, start, -1])
 
   def call("mid", [v, start, count]) do
     s = Value.to_str(v)
-    start_idx = max(trunc(Value.to_number(start)) - 1, 0)
-    String.slice(s, start_idx, max(trunc(Value.to_number(count)), 0))
-  end
+    len = String.length(s)
+    start_idx = trunc(Value.to_number(start)) - 1
+    c = trunc(Value.to_number(count))
 
-  def call("mid", [v, start]) do
-    s = Value.to_str(v)
-    start_idx = max(trunc(Value.to_number(start)) - 1, 0)
-    String.slice(s, start_idx, String.length(s))
+    cond do
+      start_idx < 0 ->
+        raise CFException,
+          message: "Parameter 2 of function mid which is now [#{start_idx + 1}] must be a positive integer"
+
+      c < -1 ->
+        raise CFException,
+          message: "Parameter 3 of function mid which is now [#{c}] must be a non-negative integer or -1 (for string length)"
+
+      start_idx > len ->
+        ""
+
+      true ->
+        count = if c == -1, do: len, else: c
+        take = min(count, len - start_idx)
+        String.slice(s, start_idx, take)
+    end
   end
 
   ## Trimming
@@ -62,21 +109,15 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   ## Searching
 
-  def call("find", [needle, haystack]) do
-    find_position(Value.to_str(haystack), Value.to_str(needle), 1)
-  end
+  def call("find", [needle, haystack]), do: find_position(Value.to_str(haystack), Value.to_str(needle), 1)
 
-  def call("find", [needle, haystack, start]) do
-    find_position(Value.to_str(haystack), Value.to_str(needle), trunc(Value.to_number(start)))
-  end
+  def call("find", [needle, haystack, start]),
+    do: find_position(Value.to_str(haystack), Value.to_str(needle), trunc(Value.to_number(start)))
 
-  def call("findnocase", [needle, haystack]) do
-    find_position(downcase(haystack), downcase(needle), 1)
-  end
+  def call("findnocase", [needle, haystack]), do: find_position(downcase(haystack), downcase(needle), 1)
 
-  def call("findnocase", [needle, haystack, start]) do
-    find_position(downcase(haystack), downcase(needle), trunc(Value.to_number(start)))
-  end
+  def call("findnocase", [needle, haystack, start]),
+    do: find_position(downcase(haystack), downcase(needle), trunc(Value.to_number(start)))
 
   # REFind: 1-based position of the first regex match, or 0. The
   # struct-returning (returnsubexpressions=true) form is added when a spec needs it.
@@ -89,15 +130,20 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   def call("reverse", [v]), do: String.reverse(Value.to_str(v))
 
-  def call("repeatstring", [v, count]) do
-    String.duplicate(Value.to_str(v), max(trunc(Value.to_number(count)), 0))
-  end
+  def call("repeatstring", [v, count]),
+    do: String.duplicate(Value.to_str(v), max(trunc(Value.to_number(count)), 0))
 
-  # `val`: leading numeric chars (a period included) -> number; 0 otherwise.
-  def call("val", [v]) do
-    case Value.as_number(leading_number(Value.to_str(v))) do
-      {:ok, n} -> n
-      :error -> 0
+  # val / valNumber — Lucee Val.java / ValNumber.java: leading numeric prefix
+  # (sign and a single dot allowed) -> number, else 0.
+  def call(name, [v]) when name in ["val", "valnumber"] do
+    s = String.trim(Value.to_str(v))
+    pos = leading_number_length(s)
+
+    if pos <= 0 do
+      0
+    else
+      {:ok, n} = Value.as_number(binary_part(s, 0, pos))
+      n
     end
   end
 
@@ -109,29 +155,6 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   @spec downcase(any()) :: String.t()
   defp downcase(v), do: String.downcase(Value.to_str(v))
-
-  # left/right with Lucee semantics: count > length returns the whole string;
-  # a negative count means "all but the last |count|" (left) / "all but the
-  # first |count|" (right).
-  @spec substring_left(String.t(), number()) :: String.t()
-  defp substring_left(s, count) do
-    n = effective_count(count, String.length(s))
-    String.slice(s, 0, n)
-  end
-
-  @spec substring_right(String.t(), number()) :: String.t()
-  defp substring_right(s, count) do
-    len = String.length(s)
-    n = effective_count(count, len)
-    String.slice(s, len - n, n)
-  end
-
-  @spec effective_count(number(), non_neg_integer()) :: non_neg_integer()
-  defp effective_count(count, len) do
-    count = trunc(count)
-    resolved = if count < 0, do: len + count, else: count
-    resolved |> max(0) |> min(len)
-  end
 
   @spec find_position(String.t(), String.t(), integer()) :: non_neg_integer()
   defp find_position(_haystack, "", _start), do: 0
@@ -163,11 +186,45 @@ defmodule ExML.CFScript.BIF.StringFns do
     end
   end
 
-  @spec leading_number(String.t()) :: String.t()
-  defp leading_number(s) do
-    case Regex.run(~r/^\s*(-?\d+(\.\d+)?)/, s) do
-      [_, num | _] -> num
-      nil -> "0"
+  # Port of Lucee ValNumber.getPos/1: the length of the leading numeric prefix.
+  # Optional leading sign; digits; a single dot, but not a trailing dot.
+  @spec leading_number_length(String.t()) :: non_neg_integer()
+  defp leading_number_length(""), do: 0
+
+  defp leading_number_length(str) do
+    chars = String.graphemes(str)
+    len = length(chars)
+    {start, ok} = leading_sign(chars, len)
+
+    if ok and first_is_numeric_start?(Enum.at(chars, start)) do
+      scan_number(chars, start, len, false)
+    else
+      0
+    end
+  end
+
+  @spec leading_sign([String.t()], non_neg_integer()) :: {non_neg_integer(), boolean()}
+  defp leading_sign([c | _], len) when c in ["+", "-"], do: {1, len > 1}
+  defp leading_sign(_chars, _len), do: {0, true}
+
+  @spec first_is_numeric_start?(String.t() | nil) :: boolean()
+  defp first_is_numeric_start?(nil), do: false
+  defp first_is_numeric_start?(c), do: c == "." or (c >= "0" and c <= "9")
+
+  @spec scan_number([String.t()], non_neg_integer(), non_neg_integer(), boolean()) :: non_neg_integer()
+  defp scan_number(_chars, pos, len, _has_dot) when pos >= len, do: pos
+
+  defp scan_number(chars, pos, len, has_dot) do
+    case Enum.at(chars, pos) do
+      "." ->
+        # a trailing dot (or a second dot) terminates the number before it
+        if pos + 1 >= len or has_dot, do: pos, else: scan_number(chars, pos + 1, len, true)
+
+      c when c >= "0" and c <= "9" ->
+        scan_number(chars, pos + 1, len, has_dot)
+
+      _ ->
+        pos
     end
   end
 end

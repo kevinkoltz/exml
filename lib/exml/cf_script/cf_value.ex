@@ -70,7 +70,9 @@ defimpl ExML.CFScript.CFValue, for: BitString do
   def to_str(s), do: s
 
   def as_number(s) do
-    trimmed = String.trim(s)
+    # Lucee accepts a leading dot (".5"); Elixir's Float.parse does not, so
+    # normalize "[sign].digits" to "[sign]0.digits" first.
+    trimmed = s |> String.trim() |> normalize_leading_dot()
 
     case Integer.parse(trimmed) do
       {n, ""} ->
@@ -84,11 +86,30 @@ defimpl ExML.CFScript.CFValue, for: BitString do
     end
   end
 
+  defp normalize_leading_dot(<<sign, ".", rest::binary>>) when sign in [?+, ?-],
+    do: <<sign, "0.", rest::binary>>
+
+  defp normalize_leading_dot("." <> rest), do: "0." <> rest
+  defp normalize_leading_dot(other), do: other
+
+  # Lucee Caster.toBoolean(String): exact true/false/yes/no words (length >= 2,
+  # case-insensitive, no trim); otherwise the numeric value (!= 0); otherwise a
+  # cast error. Notably "" and non-numeric words are NOT false — they throw.
   def truthy?(s) do
-    case String.downcase(String.trim(s)) do
-      v when v in ["true", "yes"] -> true
-      v when v in ["false", "no", ""] -> false
-      _ -> numeric_truthy(s)
+    case boolean_word(s) do
+      true -> true
+      false -> false
+      :not_a_word -> numeric_truthy(s)
+    end
+  end
+
+  defp boolean_word(s) when byte_size(s) < 2, do: :not_a_word
+
+  defp boolean_word(s) do
+    case String.downcase(s) do
+      w when w in ["true", "yes"] -> true
+      w when w in ["false", "no"] -> false
+      _ -> :not_a_word
     end
   end
 
