@@ -122,7 +122,7 @@ defmodule ExML.CFScript.Runner do
       raise CFException,
         cf_type: "AssertionError",
         message:
-          "Expected #{Value.to_str(expected)} but got #{Value.to_str(actual)}" <>
+          "Expected #{Value.display(expected)} but got #{Value.display(actual)}" <>
             suffix(rest)
     end
 
@@ -133,7 +133,7 @@ defmodule ExML.CFScript.Runner do
     if Value.equals?(actual, expected) do
       raise CFException,
         cf_type: "AssertionError",
-        message: "Expected value to not equal #{Value.to_str(expected)} but it did" <> suffix(rest)
+        message: "Expected value to not equal #{Value.display(expected)} but it did" <> suffix(rest)
     end
 
     nil
@@ -143,7 +143,7 @@ defmodule ExML.CFScript.Runner do
     unless Value.truthy?(condition) do
       raise CFException,
         cf_type: "AssertionError",
-        message: "Expected true but got #{Value.to_str(condition)}" <> suffix(rest)
+        message: "Expected true but got #{Value.display(condition)}" <> suffix(rest)
     end
 
     nil
@@ -153,14 +153,14 @@ defmodule ExML.CFScript.Runner do
     if Value.truthy?(condition) do
       raise CFException,
         cf_type: "AssertionError",
-        message: "Expected false but got #{Value.to_str(condition)}" <> suffix(rest)
+        message: "Expected false but got #{Value.display(condition)}" <> suffix(rest)
     end
 
     nil
   end
 
   defp assert_match([actual, pattern | rest], _env) do
-    str = Value.to_str(actual)
+    str = Value.display(actual)
 
     matched =
       case Regex.compile(Value.to_str(pattern)) do

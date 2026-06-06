@@ -1,11 +1,14 @@
 defmodule ExML.CFScript.Value do
   @moduledoc """
-  Runtime value types and CFML value semantics (coercion, truthiness, equality).
+  Runtime value structs and the binary value operations CFML needs.
 
-  Runtime values are: Elixir binaries (strings), integers/floats (numbers),
-  booleans, `nil` (CFML null), plus the structs defined here for components,
-  closures, and native functions.
+  Per-type coercion (string / number / boolean / type label) lives in the
+  `ExML.CFScript.CFValue` protocol; this module is the facade for it plus the
+  operations that take *two* values — equality and ordering — which a
+  single-dispatch protocol can't express directly.
   """
+
+  alias ExML.CFScript.CFValue
 
   defmodule Instance do
     @moduledoc "An instantiated CFC."
@@ -37,53 +40,38 @@ defmodule ExML.CFScript.Value do
     defstruct [:name, :fun]
   end
 
+  ## Single-value coercion (delegated to the protocol)
+
+  @doc "Coerce a value to a CFML string."
+  @spec to_str(any()) :: String.t()
+  defdelegate to_str(value), to: CFValue
+
   @doc "CFML truthiness."
   @spec truthy?(any()) :: boolean()
-  def truthy?(true), do: true
-  def truthy?(false), do: false
-  def truthy?(nil), do: false
-  def truthy?(n) when is_number(n), do: n != 0
+  defdelegate truthy?(value), to: CFValue
 
-  def truthy?(s) when is_binary(s) do
-    case String.downcase(String.trim(s)) do
-      "true" -> true
-      "yes" -> true
-      "false" -> false
-      "no" -> false
-      "" -> false
-      other -> numeric_truthy(other)
+  @doc "Attempt to interpret a value as a number."
+  @spec as_number(any()) :: {:ok, number()} | :error
+  defdelegate as_number(value), to: CFValue
+
+  @doc "CFML type label for a value."
+  @spec type_name(any()) :: atom()
+  defdelegate type_name(value), to: CFValue
+
+  @doc "Coerce to a number, raising a CFML cast error if not numeric."
+  @spec to_number(any()) :: number()
+  def to_number(value) do
+    case as_number(value) do
+      {:ok, n} -> n
+      :error -> raise ExML.CFScript.CFException, message: "Can't cast [#{display(value)}] to a number"
     end
   end
 
-  def truthy?(_), do: true
+  @doc "Whether a value is a CFML \"simple\" value (string / number / boolean)."
+  @spec simple?(any()) :: boolean()
+  def simple?(value), do: type_name(value) in [:string, :number, :boolean]
 
-  @spec numeric_truthy(String.t()) :: boolean()
-  defp numeric_truthy(s) do
-    case parse_number(s) do
-      {:ok, n} -> n != 0
-      :error -> raise ExML.CFScript.CFException, message: "Cannot cast '#{s}' to a boolean"
-    end
-  end
-
-  @doc "Stringify a value for concatenation / output, CFML-style."
-  @spec to_str(any()) :: String.t()
-  def to_str(nil), do: ""
-  def to_str(s) when is_binary(s), do: s
-  def to_str(true), do: "true"
-  def to_str(false), do: "false"
-  def to_str(n) when is_integer(n), do: Integer.to_string(n)
-
-  def to_str(n) when is_float(n) do
-    # CFML prints whole floats without a trailing ".0".
-    if n == Float.round(n) and abs(n) < 1.0e15 do
-      n |> trunc() |> Integer.to_string()
-    else
-      Float.to_string(n)
-    end
-  end
-
-  def to_str(%Instance{type_path: p}), do: "[component #{p}]"
-  def to_str(other), do: inspect(other)
+  ## Binary operations
 
   @doc """
   CFML loose equality (`==`/`eq`): numeric comparison when both operands look
@@ -97,63 +85,51 @@ defmodule ExML.CFScript.Value do
     end
   end
 
-  @doc "Numeric comparison helper returning :lt | :eq | :gt for `<`,`>`,`<=`,`>=`."
+  @doc "Ordering comparison returning `:lt | :eq | :gt`, used by `<`, `>`, `<=`, `>=`."
   @spec compare(any(), any()) :: :lt | :eq | :gt
   def compare(a, b) do
     case {as_number(a), as_number(b)} do
-      {{:ok, na}, {:ok, nb}} -> num_compare(na, nb)
-      _ -> string_compare(a, b)
+      {{:ok, na}, {:ok, nb}} -> number_compare(na, nb)
+      _ -> string_compare(to_str(a), to_str(b))
     end
   end
 
-  defp num_compare(a, b) when a < b, do: :lt
-  defp num_compare(a, b) when a > b, do: :gt
-  defp num_compare(_, _), do: :eq
+  @spec number_compare(number(), number()) :: :lt | :eq | :gt
+  defp number_compare(a, b) when a < b, do: :lt
+  defp number_compare(a, b) when a > b, do: :gt
+  defp number_compare(_a, _b), do: :eq
 
+  @spec string_compare(String.t(), String.t()) :: :lt | :eq | :gt
   defp string_compare(a, b) do
-    sa = String.downcase(to_str(a))
-    sb = String.downcase(to_str(b))
+    a = String.downcase(a)
+    b = String.downcase(b)
 
     cond do
-      sa < sb -> :lt
-      sa > sb -> :gt
+      a < b -> :lt
+      a > b -> :gt
       true -> :eq
     end
   end
 
-  @doc "Coerce to a number, raising if not numeric."
-  @spec to_number(any()) :: number()
-  def to_number(value) do
-    case as_number(value) do
-      {:ok, n} -> n
-      :error -> raise ExML.CFScript.CFException, message: "Cannot cast '#{to_str(value)}' to a number"
+  ## Human-facing display (never raises — for assertion/error messages)
+
+  @doc """
+  A safe, human-readable rendering for messages. Unlike `to_str/1` this never
+  raises on complex values; it labels them instead.
+  """
+  @spec display(any()) :: String.t()
+  def display(value) do
+    case type_name(value) do
+      t when t in [:string, :number, :boolean] -> to_str(value)
+      :null -> ""
+      :array -> "[array (#{length(value)})]"
+      :struct -> "[struct (#{map_size(value)} keys)]"
+      :component -> "[component #{component_path(value)}]"
+      other -> "[#{other}]"
     end
   end
 
-  @doc "Attempt to interpret a value as a number."
-  @spec as_number(any()) :: {:ok, number()} | :error
-  def as_number(n) when is_number(n), do: {:ok, n}
-  def as_number(true), do: {:ok, 1}
-  def as_number(false), do: {:ok, 0}
-  def as_number(s) when is_binary(s), do: parse_number(String.trim(s))
-  def as_number(_), do: :error
-
-  @spec parse_number(String.t()) :: {:ok, number()} | :error
-  defp parse_number(s) do
-    case Integer.parse(s) do
-      {n, ""} ->
-        {:ok, n}
-
-      _ ->
-        case Float.parse(s) do
-          {f, ""} -> {:ok, f}
-          _ -> :error
-        end
-    end
-  end
-
-  @doc "Whether a value is a CFML \"simple\" value (string/number/boolean/date)."
-  @spec simple?(any()) :: boolean()
-  def simple?(v) when is_binary(v) or is_number(v) or is_boolean(v), do: true
-  def simple?(_), do: false
+  defp component_path(%Instance{type_path: path}), do: path
+  defp component_path(%ComponentType{path: path}), do: path
+  defp component_path(_), do: ""
 end
