@@ -11,6 +11,7 @@ defmodule ExML.CFScript.BIF.StructFns do
   @names ~w(
     structkeyexists structnew structcount structisempty structkeyarray
     structkeylist structinsert structappend structdelete structupdate structcopy
+    structclear
   )
 
   @impl true
@@ -24,6 +25,7 @@ defmodule ExML.CFScript.BIF.StructFns do
   def call("structkeyexists", [_other, _key]), do: false
 
   def call("structnew", _args), do: %{}
+  def call("structclear", [struct]) when is_map(struct), do: %{}
   def call("structcount", [struct]) when is_map(struct), do: map_size(struct)
   def call("structisempty", [struct]) when is_map(struct), do: map_size(struct) == 0
   def call("structkeyarray", [struct]) when is_map(struct), do: Map.keys(struct)

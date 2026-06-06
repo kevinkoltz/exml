@@ -8,7 +8,7 @@ defmodule ExML.CFScript.Value do
   single-dispatch protocol can't express directly.
   """
 
-  alias ExML.CFScript.CFValue
+  alias ExML.CFScript.{CFValue, Heap}
 
   defmodule Instance do
     @moduledoc "An instantiated CFC."
@@ -38,6 +38,18 @@ defmodule ExML.CFScript.Value do
     @moduledoc "A host (Elixir) function exposed to cfscript. `fun` takes (args, env)."
     @type t :: %__MODULE__{name: String.t(), fun: (list(), term() -> any())}
     defstruct [:name, :fun]
+  end
+
+  defmodule ArrayRef do
+    @moduledoc "A mutable reference to a CFML array (backed by `ExML.CFScript.Heap`)."
+    @type t :: %__MODULE__{cell: reference()}
+    defstruct [:cell]
+  end
+
+  defmodule StructRef do
+    @moduledoc "A mutable reference to a CFML struct (backed by `ExML.CFScript.Heap`)."
+    @type t :: %__MODULE__{cell: reference()}
+    defstruct [:cell]
   end
 
   ## Single-value coercion (delegated to the protocol)
@@ -81,7 +93,23 @@ defmodule ExML.CFScript.Value do
   numeric, otherwise a case-insensitive string comparison.
   """
   @spec equals?(any(), any()) :: boolean()
-  def equals?(a, b) do
+  def equals?(a, b), do: deref_equals?(Heap.deref(a), Heap.deref(b))
+
+  # Arrays/structs compare structurally (Lucee throws on complex `==`, but
+  # structural equality is more useful for assertions); simple values compare
+  # numerically when both look numeric, else case-insensitively.
+  @spec deref_equals?(any(), any()) :: boolean()
+  defp deref_equals?(a, b) when is_list(a) and is_list(b) do
+    length(a) == length(b) and a |> Enum.zip(b) |> Enum.all?(fn {x, y} -> equals?(x, y) end)
+  end
+
+  defp deref_equals?(a, b)
+       when is_map(a) and is_map(b) and not is_struct(a) and not is_struct(b) do
+    Map.keys(a) |> Enum.sort() == Map.keys(b) |> Enum.sort() and
+      Enum.all?(a, fn {k, v} -> Map.has_key?(b, k) and equals?(v, Map.fetch!(b, k)) end)
+  end
+
+  defp deref_equals?(a, b) do
     case {as_number(a), as_number(b)} do
       {{:ok, na}, {:ok, nb}} -> na == nb
       _ -> String.downcase(to_str(a)) == String.downcase(to_str(b))
@@ -125,8 +153,8 @@ defmodule ExML.CFScript.Value do
     case type_name(value) do
       t when t in [:string, :number, :boolean] -> to_str(value)
       :null -> ""
-      :array -> "[array (#{length(value)})]"
-      :struct -> "[struct (#{map_size(value)} keys)]"
+      :array -> "[array (#{length(Heap.deref(value))})]"
+      :struct -> "[struct (#{map_size(Heap.deref(value))} keys)]"
       :component -> "[component #{component_path(value)}]"
       other -> "[#{other}]"
     end

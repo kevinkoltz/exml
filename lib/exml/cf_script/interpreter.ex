@@ -11,8 +11,17 @@ defmodule ExML.CFScript.Interpreter do
   `return` unwinds via a `throw({:return, value})` caught at the call boundary.
   """
 
-  alias ExML.CFScript.{AST, Builtins, CFException, Context, Env, Loader, Scope, Value}
-  alias ExML.CFScript.Value.{Closure, ComponentType, Instance, Namespace, Native}
+  alias ExML.CFScript.{AST, CFException, Collections, Context, Env, Heap, Loader, Scope, Value}
+
+  alias ExML.CFScript.Value.{
+    ArrayRef,
+    Closure,
+    ComponentType,
+    Instance,
+    Namespace,
+    Native,
+    StructRef
+  }
 
   @scopes ~w(arguments local variables this)
 
@@ -110,12 +119,34 @@ defmodule ExML.CFScript.Interpreter do
 
   defp assign({:member, obj_ast, name}, value, env) do
     case eval(obj_ast, env) do
+      %StructRef{} = ref ->
+        Heap.write(ref, Map.put(Heap.deref(ref), String.downcase(name), value))
+        value
+
       %Instance{variables: variables} ->
         Scope.put(variables, name, value)
         value
 
       other ->
-        raise CFException, message: "Cannot assign member '#{name}' on #{Value.to_str(other)}"
+        raise CFException, message: "Cannot assign member '#{name}' on #{Value.display(other)}"
+    end
+  end
+
+  # Indexed assignment: arr[i] = v / struct[key] = v (mutates in place).
+  defp assign({:index, obj_ast, key_ast}, value, env) do
+    key = eval(key_ast, env)
+
+    case eval(obj_ast, env) do
+      %ArrayRef{} = ref ->
+        Heap.write(ref, array_set(Heap.deref(ref), Value.to_number(key), value))
+        value
+
+      %StructRef{} = ref ->
+        Heap.write(ref, Map.put(Heap.deref(ref), String.downcase(Value.to_str(key)), value))
+        value
+
+      other ->
+        raise CFException, message: "Cannot assign by index on #{Value.display(other)}"
     end
   end
 
@@ -151,10 +182,10 @@ defmodule ExML.CFScript.Interpreter do
     obj = eval(obj_ast, env)
     key = eval(key_ast, env)
 
-    case obj do
-      m when is_map(m) -> Map.get(m, String.downcase(Value.to_str(key)))
-      list when is_list(list) -> Enum.at(list, Value.to_number(key) - 1)
-      other -> raise CFException, message: "Cannot index #{Value.to_str(other)}"
+    case Heap.deref(obj) do
+      list when is_list(list) -> array_index(list, Value.to_number(key))
+      m when is_map(m) -> struct_index(m, String.downcase(Value.to_str(key)), env)
+      other -> raise CFException, message: "Cannot index #{Value.display(other)}"
     end
   end
 
@@ -162,10 +193,16 @@ defmodule ExML.CFScript.Interpreter do
     instantiate_path(path, eval_args(args, env), env)
   end
 
-  defp eval({:array, elements}, env), do: Enum.map(elements, &eval(&1, env))
+  # Array/struct literals create fresh mutable references (reference types).
+  defp eval({:array, elements}, env) do
+    Heap.new_array(Enum.map(elements, &eval(&1, env)))
+  end
 
   defp eval({:struct, pairs}, env) do
-    for {key, value_ast} <- pairs, into: %{}, do: {String.downcase(key), eval(value_ast, env)}
+    map =
+      for {key, value_ast} <- pairs, into: %{}, do: {String.downcase(key), eval(value_ast, env)}
+
+    Heap.new_struct(map)
   end
 
   defp eval({:fun, params, body}, env) do
@@ -238,7 +275,7 @@ defmodule ExML.CFScript.Interpreter do
   # Strings, arrays, and structs delegate to the member->BIF/HigherOrder glue,
   # supplying an invoker so callback members can run UDFs.
   defp dispatch_member_call(value, name, args, env) do
-    ExML.CFScript.Members.call(value, name, args, invoker(env))
+    Collections.member_call(value, name, args, invoker(env))
   end
 
   # Resolve a bare call name: a callable variable, then a `this` method, then an
@@ -255,11 +292,8 @@ defmodule ExML.CFScript.Interpreter do
       Map.has_key?(env.ctx.natives, String.downcase(name)) ->
         invoke(Map.fetch!(env.ctx.natives, String.downcase(name)), args, env)
 
-      ExML.CFScript.HigherOrder.higher_order?(name) ->
-        ExML.CFScript.HigherOrder.call(String.downcase(name), args, invoker(env))
-
-      Builtins.builtin?(name) ->
-        Builtins.call(name, args)
+      Collections.handles?(name) ->
+        Collections.call(name, args, invoker(env))
 
       true ->
         raise CFException, message: "Undefined function: #{name}"
@@ -358,6 +392,17 @@ defmodule ExML.CFScript.Interpreter do
     end
   end
 
+  defp eval_member(%StructRef{} = ref, name, env) do
+    case Map.fetch(Heap.deref(ref), String.downcase(name)) do
+      {:ok, value} -> value
+      :error -> missing_key(name, env)
+    end
+  end
+
+  defp eval_member(%ArrayRef{}, name, _env) do
+    raise CFException, message: "Arrays have no member '#{name}' (use index access)"
+  end
+
   defp eval_member(map, name, env) when is_map(map) do
     case Map.fetch(map, String.downcase(name)) do
       {:ok, value} -> value
@@ -366,7 +411,7 @@ defmodule ExML.CFScript.Interpreter do
   end
 
   defp eval_member(other, name, _env) do
-    raise CFException, message: "Cannot read member '#{name}' on #{Value.to_str(other)}"
+    raise CFException, message: "Cannot read member '#{name}' on #{Value.display(other)}"
   end
 
   @spec read_scope_member(String.t(), String.t(), Env.t()) :: any()
@@ -387,6 +432,45 @@ defmodule ExML.CFScript.Interpreter do
   defp missing_key(name, _env) do
     raise CFException, message: "key [#{name}] doesn't exist"
   end
+
+  # Array element read (1-based). Out-of-range always raises in CFML.
+  @spec array_index([any()], number()) :: any()
+  defp array_index(list, index) do
+    i = trunc(index)
+
+    if i < 1 or i > length(list) do
+      raise CFException, message: "Array index [#{i}] out of range, array size is #{length(list)}"
+    end
+
+    Enum.at(list, i - 1)
+  end
+
+  @spec struct_index(map(), String.t(), Env.t()) :: any()
+  defp struct_index(map, key, env) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> missing_key(key, env)
+    end
+  end
+
+  # Array element write (1-based); extends the array (padding with "") when the
+  # index is beyond the current size, matching Lucee's null-less behavior.
+  @spec array_set([any()], number(), any()) :: [any()]
+  defp array_set(list, index, value) do
+    i = trunc(index)
+
+    if i < 1 do
+      raise CFException, message: "Array index [#{i}] must be a positive integer"
+    end
+
+    list
+    |> pad_to(i)
+    |> List.replace_at(i - 1, value)
+  end
+
+  @spec pad_to([any()], pos_integer()) :: [any()]
+  defp pad_to(list, size) when length(list) >= size, do: list
+  defp pad_to(list, size), do: list ++ List.duplicate("", size - length(list))
 
   # The value of a bare scope keyword (e.g. passing `arguments` to a BIF).
   @spec read_scope_value(String.t(), Env.t()) :: any()

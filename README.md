@@ -75,6 +75,18 @@ on count 0 and return the whole string when `abs(count) >= length`; `val`
 follows `ValNumber.getPos`; lists ignore empty elements by default; `isBoolean`
 rejects numbers; string→boolean coercion throws for `""`.
 
+### Reference types
+
+Arrays and structs are **reference types**, matching Lucee: `b = a` aliases the
+same collection, passing one to a function shares it, and `arr.append(x)` /
+`struct.key = v` / `arr[i] = v` mutate in place. The bare mutators
+(`arrayAppend`, `structInsert`, ...) return `true`; their member forms return
+the receiver for chaining (`arr.append(x).append(y)`), per Lucee's
+`<member-chaining>` flags. `duplicate()` makes a deep copy that shares nothing
+mutable. References are heap-backed (`ExML.CFScript.Heap`); the
+`ExML.CFScript.Collections` boundary derefs at the BIF edge so the families
+stay pure.
+
 ### Null support
 
 `isNull`/missing-key behavior follows Lucee's full-null-support setting via a
@@ -84,7 +96,6 @@ yielding null.
 
 ## Goals / roadmap
 
-* Reference-type mutation semantics for arrays/structs (in-place `arrayAppend`)
 * `for`/`for-in`/`while` loops, `switch`, ternary, `assert_throws`, `<cfquery>`
   (needed to run the larger monolithic specs end-to-end)
 * Statement-level parse recovery (skip an unsupported statement, keep the rest)

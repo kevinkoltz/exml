@@ -3,11 +3,12 @@ defmodule ExML.CFScript.BIF.ArrayFns do
   CFML array built-in functions (the non-callback ones), ported from Lucee
   6.2.5 `lucee.runtime.functions.arrays.*`. Arrays are 1-based Elixir lists.
 
-  Note on mutation: Lucee arrays are reference types and these functions mutate
-  in place (e.g. `arrayAppend` returns a boolean and grows the array). Here they
-  are pure and value-returning; faithful reference mutation is tracked
-  separately. Callback functions (`arrayMap`/`arrayFilter`/...) live in
-  `ExML.CFScript.HigherOrder` because they need the interpreter to invoke a UDF.
+  These functions are pure and value-returning (a mutator returns the new
+  list). Reference-type mutation is layered on by `ExML.CFScript.Collections`,
+  which writes a mutator's result back into the receiver's heap cell and
+  returns `true`, exactly as Lucee does. Callback functions
+  (`arrayMap`/`arrayFilter`/...) live in `ExML.CFScript.HigherOrder` because
+  they need the interpreter to invoke a UDF.
   """
 
   @behaviour ExML.CFScript.BIF
@@ -18,6 +19,7 @@ defmodule ExML.CFScript.BIF.ArrayFns do
     arraylen arraynew arrayisempty arrayappend arrayprepend arraytolist
     arraycontains arrayfind arrayfindnocase arrayslice arrayreverse
     arrayfirst arraylast arraysum arrayavg arraymax arraymin
+    arraydeleteat arrayinsertat arrayset arrayclear
   )
 
   @impl true
@@ -66,6 +68,51 @@ defmodule ExML.CFScript.BIF.ArrayFns do
   def call("arrayslice", [arr, offset, length]) when is_list(arr),
     do: slice(arr, trunc(Value.to_number(offset)), trunc(Value.to_number(length)))
 
+  ## Mutators (pure: return the new list; the Collections boundary writes it
+  ## back into the reference and returns true). 1-based indexes.
+
+  def call("arrayclear", [arr]) when is_list(arr), do: []
+
+  def call("arraydeleteat", [arr, pos]) when is_list(arr) do
+    i = trunc(Value.to_number(pos))
+
+    if i < 1 or i > length(arr),
+      do: raise(CFException, message: "arrayDeleteAt: index [#{i}] out of range")
+
+    List.delete_at(arr, i - 1)
+  end
+
+  def call("arrayinsertat", [arr, pos, value]) when is_list(arr) do
+    i = trunc(Value.to_number(pos))
+
+    if i < 1 or i > length(arr) + 1,
+      do: raise(CFException, message: "arrayInsertAt: index [#{i}] out of range")
+
+    List.insert_at(arr, i - 1, value)
+  end
+
+  # arraySet(arr, from, to, value): set every slot in [from, to], extending the
+  # array (with empty strings, like Lucee's null-less fill) as needed.
+  def call("arrayset", [arr, from, to, value]) when is_list(arr) do
+    f = trunc(Value.to_number(from))
+    t = trunc(Value.to_number(to))
+
+    if f < 1,
+      do:
+        raise(CFException,
+          message: "Start index of the function arraySet must be greater than zero; now [#{f}]"
+        )
+
+    if f > t,
+      do:
+        raise(CFException,
+          message: "End index of the function arraySet must be greater than the Start index"
+        )
+
+    extended = extend(arr, t)
+    Enum.reduce(f..t, extended, fn i, acc -> List.replace_at(acc, i - 1, value) end)
+  end
+
   def call(name, args) do
     raise CFException, message: "#{name}() not supported for #{length(args)} argument(s)"
   end
@@ -77,6 +124,11 @@ defmodule ExML.CFScript.BIF.ArrayFns do
 
   @spec numbers([any()]) :: [number()]
   defp numbers(arr), do: Enum.map(arr, &Value.to_number/1)
+
+  # Pad a list up to `size` with empty strings (Lucee has no nulls by default).
+  @spec extend([any()], non_neg_integer()) :: [any()]
+  defp extend(arr, size) when length(arr) >= size, do: arr
+  defp extend(arr, size), do: arr ++ List.duplicate("", size - length(arr))
 
   @spec index_of([any()], any(), (any(), any() -> boolean())) :: non_neg_integer()
   defp index_of(arr, value, match?) do

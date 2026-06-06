@@ -166,6 +166,28 @@ defimpl ExML.CFScript.CFValue, for: List do
   def type_name(_array), do: :array
 end
 
+# Mutable reference types (heap-backed). Same coercion as their raw list/map
+# counterparts, but carried as references so mutation is shared.
+defimpl ExML.CFScript.CFValue, for: ExML.CFScript.Value.ArrayRef do
+  def to_str(_ref),
+    do:
+      raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Array to String")
+
+  def as_number(_ref), do: :error
+  def truthy?(_ref), do: true
+  def type_name(_ref), do: :array
+end
+
+defimpl ExML.CFScript.CFValue, for: ExML.CFScript.Value.StructRef do
+  def to_str(_ref),
+    do:
+      raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Struct to String")
+
+  def as_number(_ref), do: :error
+  def truthy?(_ref), do: true
+  def type_name(_ref), do: :struct
+end
+
 # The interpreter's own runtime structs. None coerce to a string/number; they
 # differ only in the CFML type label they report, so they are grouped by label.
 defimpl ExML.CFScript.CFValue,
