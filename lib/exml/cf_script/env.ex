@@ -32,15 +32,22 @@ defmodule ExML.CFScript.Context do
   (`describe`/`it`/`assert_*`/...).
   """
 
+  @type query_result :: %{columns: [String.t()], rows: [[any()]]}
   @type t :: %__MODULE__{
           cfc_root: String.t(),
           cache: pid(),
           natives: %{optional(String.t()) => ExML.CFScript.Value.Native.t()},
-          null_support: boolean()
+          null_support: boolean(),
+          query_executor: (String.t(), any() -> query_result()) | nil
         }
 
   # `null_support` mirrors Lucee's "full null support" application/server
   # setting. Signal runs with it OFF, which is the default here: accessing a
   # missing struct key or scope variable raises rather than yielding null.
-  defstruct cfc_root: nil, cache: nil, natives: %{}, null_support: false
+  #
+  # `query_executor` backs `queryExecute`/`<cfquery>`: a function
+  # `(sql, params) -> %{columns: [...], rows: [[...]]}` (the shape of
+  # `Macola.Repo.query/2`). When nil, query execution raises — the standalone
+  # library has no database; the Phoenix app injects a Macola.Repo-backed one.
+  defstruct cfc_root: nil, cache: nil, natives: %{}, null_support: false, query_executor: nil
 end

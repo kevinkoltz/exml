@@ -13,7 +13,8 @@ defmodule ExML.CFScript.Heap do
   no cross-process sharing to worry about.
   """
 
-  alias ExML.CFScript.Value.{ArrayRef, StructRef}
+  alias ExML.CFScript.Query
+  alias ExML.CFScript.Value.{ArrayRef, QueryRef, StructRef}
 
   @doc "Wrap a list as a fresh mutable array reference."
   @spec new_array([any()]) :: ArrayRef.t()
@@ -23,14 +24,20 @@ defmodule ExML.CFScript.Heap do
   @spec new_struct(map()) :: StructRef.t()
   def new_struct(map) when is_map(map), do: %StructRef{cell: new_cell(map)}
 
+  @doc "Wrap a query as a fresh mutable query reference."
+  @spec new_query(Query.t()) :: QueryRef.t()
+  def new_query(%Query{} = query), do: %QueryRef{cell: new_cell(query)}
+
   @doc "Read the current contents of a reference."
   @spec deref(any()) :: any()
   def deref(%ArrayRef{cell: cell}), do: read(cell)
   def deref(%StructRef{cell: cell}), do: read(cell)
+  def deref(%QueryRef{cell: cell}), do: read(cell)
   def deref(other), do: other
 
   @doc "Replace the contents of a reference, returning the same reference."
-  @spec write(ArrayRef.t() | StructRef.t(), list() | map()) :: ArrayRef.t() | StructRef.t()
+  @spec write(ArrayRef.t() | StructRef.t() | QueryRef.t(), list() | map() | Query.t()) ::
+          ArrayRef.t() | StructRef.t() | QueryRef.t()
   def write(%ArrayRef{cell: cell} = ref, list) when is_list(list) do
     put(cell, list)
     ref
@@ -41,10 +48,16 @@ defmodule ExML.CFScript.Heap do
     ref
   end
 
-  @doc "Whether a value is an array or struct reference."
+  def write(%QueryRef{cell: cell} = ref, %Query{} = query) do
+    put(cell, query)
+    ref
+  end
+
+  @doc "Whether a value is an array, struct, or query reference."
   @spec ref?(any()) :: boolean()
   def ref?(%ArrayRef{}), do: true
   def ref?(%StructRef{}), do: true
+  def ref?(%QueryRef{}), do: true
   def ref?(_other), do: false
 
   ## Internal cell storage

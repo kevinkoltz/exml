@@ -188,6 +188,16 @@ defimpl ExML.CFScript.CFValue, for: ExML.CFScript.Value.StructRef do
   def type_name(_ref), do: :struct
 end
 
+defimpl ExML.CFScript.CFValue, for: ExML.CFScript.Value.QueryRef do
+  def to_str(_ref),
+    do:
+      raise(ExML.CFScript.CFException, message: "Can't cast Complex Object Type Query to String")
+
+  def as_number(_ref), do: :error
+  def truthy?(_ref), do: true
+  def type_name(_ref), do: :query
+end
+
 # The interpreter's own runtime structs. None coerce to a string/number; they
 # differ only in the CFML type label they report, so they are grouped by label.
 defimpl ExML.CFScript.CFValue,

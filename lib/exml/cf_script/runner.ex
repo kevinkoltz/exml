@@ -45,7 +45,8 @@ defmodule ExML.CFScript.Runner do
       cfc_root: cfc_root,
       cache: cache,
       natives: build_natives(),
-      null_support: Keyword.get(opts, :null_support, false)
+      null_support: Keyword.get(opts, :null_support, false),
+      query_executor: Keyword.get(opts, :query_executor)
     }
 
     try do

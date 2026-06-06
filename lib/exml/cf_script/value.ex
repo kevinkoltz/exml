@@ -52,6 +52,12 @@ defmodule ExML.CFScript.Value do
     defstruct [:cell]
   end
 
+  defmodule QueryRef do
+    @moduledoc "A mutable reference to a CFML query (backed by `ExML.CFScript.Heap`)."
+    @type t :: %__MODULE__{cell: reference()}
+    defstruct [:cell]
+  end
+
   ## Single-value coercion (delegated to the protocol)
 
   @doc "Coerce a value to a CFML string."
@@ -155,6 +161,7 @@ defmodule ExML.CFScript.Value do
       :null -> ""
       :array -> "[array (#{length(Heap.deref(value))})]"
       :struct -> "[struct (#{map_size(Heap.deref(value))} keys)]"
+      :query -> "[query (#{ExML.CFScript.Query.record_count(Heap.deref(value))} rows)]"
       :component -> "[component #{component_path(value)}]"
       other -> "[#{other}]"
     end

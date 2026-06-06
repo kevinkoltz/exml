@@ -1,0 +1,142 @@
+defmodule ExML.CFScript.QueryTest do
+  @moduledoc """
+  Query object semantics (in-memory builders) and queryExecute against a
+  pluggable executor shaped like `Macola.Repo.query/2`.
+  """
+  use ExUnit.Case, async: true
+
+  alias ExML.CFScript.Runner
+
+  @cfc_root Path.join(__DIR__, "../../fixtures/cfc") |> Path.expand()
+
+  defp run(body, opts \\ []) do
+    Runner.run_spec_source(
+      "component { function run() { #{body} } }",
+      "inline.cfc",
+      Keyword.put(opts, :cfc_root, @cfc_root)
+    )
+  end
+
+  defp passing(summary) do
+    assert summary.failed == 0, "unexpected failures: #{inspect(summary.results)}"
+    summary.passed
+  end
+
+  test "queryNew + queryAddRow + recordCount + column[row] (the scrub_query API)" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("q", function() {
+                 it("builds and reads", function() {
+                   q = queryNew("username,password_hash", "varchar,varchar");
+                   queryAddRow(q, { username: "kevin", password_hash: "abc" });
+                   queryAddRow(q, { username: "jane", password_hash: "xyz" });
+                   assert_equal(q.recordCount, 2);
+                   assert_equal(q.columnList, "username,password_hash");
+                   assert_equal(q.username[1], "kevin");
+                   assert_equal(q.password_hash[2], "xyz");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "querySetCell mutates in place (reference type), default row is the last" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("q", function() {
+                 it("sets cells", function() {
+                   q = queryNew("a", "varchar");
+                   queryAddRow(q, { a: "one" });
+                   queryAddRow(q, { a: "two" });
+                   querySetCell(q, "a", "X", 1);
+                   querySetCell(q, "a", "LAST");
+                   assert_equal(q.a[1], "X");
+                   assert_equal(q.a[2], "LAST");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "isQuery, valueList and duplicate(query) deep-copies" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("q", function() {
+                 it("predicates and copy", function() {
+                   q = queryNew("a", "varchar");
+                   queryAddRow(q, { a: "1" });
+                   queryAddRow(q, { a: "2" });
+                   assert_true(isQuery(q));
+                   assert_false(isQuery("nope"));
+                   assert_equal(valueList(q.a), "1,2");
+                   copy = duplicate(q);
+                   queryAddRow(copy, { a: "3" });
+                   assert_equal(q.recordCount, 2);
+                   assert_equal(copy.recordCount, 3);
+                 });
+               });
+               """)
+             )
+  end
+
+  test "queryExecute returns a query from the executor (Macola.Repo-shaped result)" do
+    executor = fn _sql, _params ->
+      %{columns: ["id", "name"], rows: [[1, "kevin"], [2, "jane"]]}
+    end
+
+    assert 1 ==
+             passing(
+               run(
+                 """
+                 describe("q", function() {
+                   it("runs sql", function() {
+                     q = queryExecute("SELECT id, name FROM users");
+                     assert_equal(q.recordCount, 2);
+                     assert_equal(q.name[2], "jane");
+                   });
+                 });
+                 """,
+                 query_executor: executor
+               )
+             )
+  end
+
+  test "queryExecute returnType=array yields an array of row structs" do
+    executor = fn _sql, _params -> %{columns: ["id"], rows: [[1], [2]]} end
+
+    assert 1 ==
+             passing(
+               run(
+                 """
+                 describe("q", function() {
+                   it("returns array", function() {
+                     rows = queryExecute("SELECT id FROM t", {}, { returnType: "array" });
+                     assert_true(isArray(rows));
+                     assert_equal(arrayLen(rows), 2);
+                     assert_equal(rows[1].id, 1);
+                   });
+                 });
+                 """,
+                 query_executor: executor
+               )
+             )
+  end
+
+  test "queryExecute without an executor raises a clear error" do
+    summary =
+      run("""
+      describe("q", function() {
+        it("no db", function() {
+          queryExecute("SELECT 1");
+        });
+      });
+      """)
+
+    assert summary.failed == 1
+    assert [%{message: message}] = summary.results
+    assert message =~ "query executor"
+  end
+end

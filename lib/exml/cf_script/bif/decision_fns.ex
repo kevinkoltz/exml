@@ -42,7 +42,8 @@ defmodule ExML.CFScript.BIF.DecisionFns do
   def call("isstruct", [v]), do: is_map(v) and not is_struct(v)
 
   def call("isobject", [v]), do: match?(%ExML.CFScript.Value.Instance{}, v)
-  def call("isquery", [_v]), do: false
+  # Args are derefed at the Collections boundary, so a query arrives as %Query{}.
+  def call("isquery", [v]), do: match?(%ExML.CFScript.Query{}, v)
 
   # isEmpty: empty string / array / struct.
   def call("isempty", [v]) when is_binary(v), do: v == ""

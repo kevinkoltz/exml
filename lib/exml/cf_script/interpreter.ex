@@ -11,7 +11,18 @@ defmodule ExML.CFScript.Interpreter do
   `return` unwinds via a `throw({:return, value})` caught at the call boundary.
   """
 
-  alias ExML.CFScript.{AST, CFException, Collections, Context, Env, Heap, Loader, Scope, Value}
+  alias ExML.CFScript.{
+    AST,
+    CFException,
+    Collections,
+    Context,
+    Env,
+    Heap,
+    Loader,
+    Query,
+    Scope,
+    Value
+  }
 
   alias ExML.CFScript.Value.{
     ArrayRef,
@@ -20,6 +31,7 @@ defmodule ExML.CFScript.Interpreter do
     Instance,
     Namespace,
     Native,
+    QueryRef,
     StructRef
   }
 
@@ -292,6 +304,9 @@ defmodule ExML.CFScript.Interpreter do
       Map.has_key?(env.ctx.natives, String.downcase(name)) ->
         invoke(Map.fetch!(env.ctx.natives, String.downcase(name)), args, env)
 
+      String.downcase(name) == "queryexecute" ->
+        exec_query(args, env)
+
       Collections.handles?(name) ->
         Collections.call(name, args, invoker(env))
 
@@ -299,6 +314,39 @@ defmodule ExML.CFScript.Interpreter do
         raise CFException, message: "Undefined function: #{name}"
     end
   end
+
+  # queryExecute(sql [, params [, options]]). The actual SQL runs through the
+  # pluggable Context.query_executor (e.g. Macola.Repo when wired into the
+  # Phoenix app); without one configured it raises. options.returnType selects
+  # "query" (default, a QueryRef) or "array" (an array of row structs).
+  @spec exec_query([any()], Env.t()) :: any()
+  defp exec_query(args, %Env{ctx: ctx}) do
+    executor = ctx.query_executor || no_executor()
+    sql = Value.to_str(Enum.at(args, 0))
+    params = Heap.deref(Enum.at(args, 1, %{}))
+    options = Heap.deref(Enum.at(args, 2, %{}))
+
+    query = Query.from_result(executor.(sql, params))
+
+    case options |> Map.get("returntype") |> normalize_return_type() do
+      "array" ->
+        query |> Query.to_array() |> Enum.map(&Heap.new_struct/1) |> Heap.new_array()
+
+      _ ->
+        Heap.new_query(query)
+    end
+  end
+
+  @spec no_executor() :: no_return()
+  defp no_executor do
+    raise CFException,
+      message:
+        "queryExecute requires a configured query executor; run from the Phoenix app (Macola.Repo) or pass :query_executor"
+  end
+
+  @spec normalize_return_type(any()) :: String.t()
+  defp normalize_return_type(nil), do: "query"
+  defp normalize_return_type(value), do: value |> Value.to_str() |> String.downcase()
 
   # An invoker closure for higher-order functions: runs a UDF (closure/native)
   # with evaluated args in the current environment.
@@ -401,6 +449,20 @@ defmodule ExML.CFScript.Interpreter do
 
   defp eval_member(%ArrayRef{}, name, _env) do
     raise CFException, message: "Arrays have no member '#{name}' (use index access)"
+  end
+
+  # Query member access: pseudo-columns (recordCount/columnList/...) yield
+  # scalars; a real column name yields that column's values (1-based indexable).
+  defp eval_member(%QueryRef{} = ref, name, env) do
+    q = Heap.deref(ref)
+
+    case String.downcase(name) do
+      "recordcount" -> Query.record_count(q)
+      "columnlist" -> Query.column_list(q)
+      "columncount" -> Query.column_count(q)
+      "currentrow" -> 1
+      _ -> if Query.column?(q, name), do: Query.column_data(q, name), else: missing_key(name, env)
+    end
   end
 
   defp eval_member(map, name, env) when is_map(map) do

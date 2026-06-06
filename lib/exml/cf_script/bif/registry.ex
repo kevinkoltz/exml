@@ -8,9 +8,9 @@ defmodule ExML.CFScript.BIF.Registry do
   anonymous functions in module attributes.
   """
 
-  alias ExML.CFScript.BIF.{ArrayFns, DecisionFns, ListFns, StringFns, StructFns}
+  alias ExML.CFScript.BIF.{ArrayFns, DecisionFns, ListFns, QueryFns, StringFns, StructFns}
 
-  @families [StringFns, DecisionFns, ListFns, ArrayFns, StructFns]
+  @families [StringFns, DecisionFns, ListFns, ArrayFns, StructFns, QueryFns]
 
   @table for family <- @families,
              name <- family.names(),

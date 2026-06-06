@@ -67,6 +67,10 @@ Lucee 6.2.5 sources and scoped to what the Signal repo actually uses:
 * **Struct** — `structKeyExists`, `structNew`, `structCount`, `structIsEmpty`,
   `structKeyArray`, `structKeyList`, `structInsert`, `structAppend`,
   `structDelete`, `structUpdate`, `structCopy`
+* **Query** — `queryNew`, `queryAddRow`, `querySetCell`, `queryAddColumn`,
+  `queryColumnData`, `queryColumnList`, `queryRecordCount`, `queryGetRow`,
+  `queryColumnExists`, `valueList`, `valueArray`, plus `q.recordCount`,
+  `q.columnList`, and `q.column[row]` access
 * **Higher-order** (`ExML.CFScript.HigherOrder`, take UDF callbacks) —
   `arrayMap/Filter/Reduce/Each/Some/Every` and `structEach/Map/Filter/Reduce`
 
@@ -87,6 +91,16 @@ mutable. References are heap-backed (`ExML.CFScript.Heap`); the
 `ExML.CFScript.Collections` boundary derefs at the BIF edge so the families
 stay pure.
 
+### Queries and `queryExecute`
+
+Queries are a reference type (`queryNew`/`queryAddRow`/`querySetCell` mutate in
+place). `queryExecute(sql, params, options)` runs SQL through a **pluggable
+executor** — a `Context.query_executor` / `:query_executor` Runner option shaped
+like `Macola.Repo.query/2` (`(sql, params) -> %{columns: [...], rows: [[...]]}`).
+The standalone library has no database, so without an executor it raises; the
+Phoenix app injects a `Macola.Repo`-backed one (data_01/data_555). `options`
+supports `returnType` `"query"` (default) and `"array"` (array of row structs).
+
 ### Null support
 
 `isNull`/missing-key behavior follows Lucee's full-null-support setting via a
@@ -96,8 +110,10 @@ yielding null.
 
 ## Goals / roadmap
 
-* `for`/`for-in`/`while` loops, `switch`, ternary, `assert_throws`, `<cfquery>`
-  (needed to run the larger monolithic specs end-to-end)
+* `for`/`for-in`/`while` loops, `switch`, ternary, `assert_throws`, arrow
+  functions, `static.` scope (needed to run the larger monolithic specs)
+* `<cfquery>` tag (script world uses `queryExecute`; the tag matters once
+  tag-based `<cffunction>` bodies are interpreted)
 * Statement-level parse recovery (skip an unsupported statement, keep the rest)
 * Date/query function families
 

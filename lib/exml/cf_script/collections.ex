@@ -21,15 +21,17 @@ defmodule ExML.CFScript.Collections do
   `core-base.fld`.
   """
 
-  alias ExML.CFScript.{BIF.Registry, CFException, Heap, HigherOrder, Value}
-  alias ExML.CFScript.Value.{ArrayRef, StructRef}
+  alias ExML.CFScript.{BIF.Registry, CFException, Heap, HigherOrder, Query, Value}
+  alias ExML.CFScript.Value.{ArrayRef, QueryRef, StructRef}
 
   @type invoke :: (any(), [any()] -> any())
 
-  # Mutating BIFs: mutate the first argument's collection in place, bare-return true.
+  # Mutating BIFs: mutate the first argument's collection in place. Most
+  # bare-return true; the query mutators return a count (see mutator_return/2).
   @mutators ~w(
     arrayappend arrayprepend arraydeleteat arrayinsertat arrayset arrayclear
     structinsert structdelete structupdate structappend structclear
+    queryaddrow querysetcell queryaddcolumn
   )
 
   # member-chaining=true functions (Lucee core-base.fld): the member form
@@ -80,6 +82,12 @@ defmodule ExML.CFScript.Collections do
     ref |> Heap.deref() |> Map.new(fn {k, v} -> {k, deep_copy(v)} end) |> Heap.new_struct()
   end
 
+  defp deep_copy(%QueryRef{} = ref) do
+    %Query{columns: columns, rows: rows} = Heap.deref(ref)
+    copied = Enum.map(rows, fn row -> Map.new(row, fn {k, v} -> {k, deep_copy(v)} end) end)
+    Heap.new_query(%Query{columns: columns, rows: copied})
+  end
+
   defp deep_copy(value), do: value
 
   @doc """
@@ -96,26 +104,34 @@ defmodule ExML.CFScript.Collections do
 
   ## Mutation
 
-  @spec mutate(String.t(), [any()]) :: true
+  @spec mutate(String.t(), [any()]) :: any()
   defp mutate(name, [ref | _] = args) do
     new_collection = Registry.call(name, deref_all(args))
 
     if Heap.ref?(ref) do
       Heap.write(ref, new_collection)
     else
-      raise CFException, message: "#{name}() expected an array/struct reference"
+      raise CFException, message: "#{name}() expected an array/struct/query reference"
     end
 
-    true
+    mutator_return(name, new_collection)
   end
+
+  # Lucee mutator return values: arrays/structs return true; queryAddRow returns
+  # the new record count, queryAddColumn the new column count.
+  @spec mutator_return(String.t(), any()) :: any()
+  defp mutator_return("queryaddrow", %Query{} = q), do: Query.record_count(q)
+  defp mutator_return("queryaddcolumn", %Query{} = q), do: Query.column_count(q)
+  defp mutator_return(_name, _new), do: true
 
   ## Deref / wrap
 
   @spec deref_all([any()]) :: [any()]
   defp deref_all(args), do: Enum.map(args, &Heap.deref/1)
 
-  # Raw list/map results become fresh references; scalars pass through.
+  # Raw list/map/query results become fresh references; scalars pass through.
   @spec wrap(any()) :: any()
+  defp wrap(%Query{} = query), do: Heap.new_query(query)
   defp wrap(value) when is_list(value), do: Heap.new_array(value)
   defp wrap(value) when is_map(value) and not is_struct(value), do: Heap.new_struct(value)
   defp wrap(value), do: value
