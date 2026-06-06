@@ -466,6 +466,52 @@ defmodule ExML.CFScript.Parser do
 
   defp parse_argument(tokens), do: parse_expr(tokens)
 
+  # Comma-separated expressions until `closer` (used for array literals).
+  @spec parse_list_until([Lexer.token()], String.t(), [tuple()]) :: {[tuple()], [Lexer.token()]}
+  defp parse_list_until([{:op, closer} | rest], closer, acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_list_until(tokens, closer, acc) do
+    {expr, rest} = parse_expr(tokens)
+
+    case rest do
+      [{:op, ","} | rest2] -> parse_list_until(rest2, closer, [expr | acc])
+      [{:op, ^closer} | rest2] -> {Enum.reverse([expr | acc]), rest2}
+      _ -> raise "ExML.CFScript.Parser: expected ',' or '#{closer}' near #{inspect(Enum.take(rest, 3))}"
+    end
+  end
+
+  # Struct literal pairs: `key (: | =) expr`, comma-separated, until `}`.
+  @spec parse_struct_pairs([Lexer.token()], [{String.t(), tuple()}]) ::
+          {[{String.t(), tuple()}], [Lexer.token()]}
+  defp parse_struct_pairs([{:op, "}"} | rest], acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_struct_pairs(tokens, acc) do
+    {key, tokens} = parse_struct_key(tokens)
+    tokens = expect_struct_separator(tokens)
+    {value, tokens} = parse_expr(tokens)
+    acc = [{key, value} | acc]
+
+    case tokens do
+      [{:op, ","} | rest] -> parse_struct_pairs(rest, acc)
+      [{:op, "}"} | rest] -> {Enum.reverse(acc), rest}
+      _ -> raise "ExML.CFScript.Parser: expected ',' or '}' in struct near #{inspect(Enum.take(tokens, 3))}"
+    end
+  end
+
+  @spec parse_struct_key([Lexer.token()]) :: {String.t(), [Lexer.token()]}
+  defp parse_struct_key([{:ident, name} | rest]), do: {name, rest}
+  defp parse_struct_key([{:string, s} | rest]), do: {s, rest}
+  defp parse_struct_key([{:int, n} | rest]), do: {Integer.to_string(n), rest}
+
+  defp parse_struct_key(tokens),
+    do: raise("ExML.CFScript.Parser: invalid struct key near #{inspect(Enum.take(tokens, 3))}")
+
+  @spec expect_struct_separator([Lexer.token()]) :: [Lexer.token()]
+  defp expect_struct_separator([{:op, op} | rest]) when op in [":", "="], do: rest
+
+  defp expect_struct_separator(tokens),
+    do: raise("ExML.CFScript.Parser: expected ':' or '=' in struct near #{inspect(Enum.take(tokens, 3))}")
+
   ## Primary expressions
 
   @spec parse_primary([Lexer.token()]) :: {tuple(), [Lexer.token()]}
@@ -476,6 +522,18 @@ defmodule ExML.CFScript.Parser do
   defp parse_primary([{:op, "("} | rest]) do
     {expr, rest} = parse_expr(rest)
     {expr, expect_op(rest, ")")}
+  end
+
+  # Array literal: [a, b, c]
+  defp parse_primary([{:op, "["} | rest]) do
+    {elements, rest} = parse_list_until(rest, "]", [])
+    {{:array, elements}, rest}
+  end
+
+  # Struct literal: {key: val, "k2" = v2}
+  defp parse_primary([{:op, "{"} | rest]) do
+    {pairs, rest} = parse_struct_pairs(rest, [])
+    {{:struct, pairs}, rest}
   end
 
   defp parse_primary([{:ident, w} | rest] = tokens) do

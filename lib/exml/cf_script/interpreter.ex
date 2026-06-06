@@ -162,6 +162,12 @@ defmodule ExML.CFScript.Interpreter do
     instantiate_path(path, eval_args(args, env), env)
   end
 
+  defp eval({:array, elements}, env), do: Enum.map(elements, &eval(&1, env))
+
+  defp eval({:struct, pairs}, env) do
+    for {key, value_ast} <- pairs, into: %{}, do: {String.downcase(key), eval(value_ast, env)}
+  end
+
   defp eval({:fun, params, body}, env) do
     %Closure{params: params, body: body, env: env}
   end
@@ -229,16 +235,10 @@ defmodule ExML.CFScript.Interpreter do
     call_instance_method(inst, name, args, env.ctx)
   end
 
-  defp dispatch_member_call(str, name, args, _env) when is_binary(str) do
-    Builtins.call(name, [str | args])
-  end
-
-  defp dispatch_member_call(list, name, args, _env) when is_list(list) do
-    Builtins.call(name, [list | args])
-  end
-
-  defp dispatch_member_call(other, name, _args, _env) do
-    raise CFException, message: "Cannot call '#{name}' on #{Value.to_str(other)}"
+  # Strings, arrays, and structs delegate to the member->BIF/HigherOrder glue,
+  # supplying an invoker so callback members can run UDFs.
+  defp dispatch_member_call(value, name, args, env) do
+    ExML.CFScript.Members.call(value, name, args, invoker(env))
   end
 
   # Resolve a bare call name: a callable variable, then a `this` method, then an
@@ -255,6 +255,9 @@ defmodule ExML.CFScript.Interpreter do
       Map.has_key?(env.ctx.natives, String.downcase(name)) ->
         invoke(Map.fetch!(env.ctx.natives, String.downcase(name)), args, env)
 
+      ExML.CFScript.HigherOrder.higher_order?(name) ->
+        ExML.CFScript.HigherOrder.call(String.downcase(name), args, invoker(env))
+
       Builtins.builtin?(name) ->
         Builtins.call(name, args)
 
@@ -262,6 +265,11 @@ defmodule ExML.CFScript.Interpreter do
         raise CFException, message: "Undefined function: #{name}"
     end
   end
+
+  # An invoker closure for higher-order functions: runs a UDF (closure/native)
+  # with evaluated args in the current environment.
+  @spec invoker(Env.t()) :: (any(), [any()] -> any())
+  defp invoker(env), do: fn callable, call_args -> invoke(callable, call_args, env) end
 
   @spec callable_var(String.t(), Env.t()) :: any() | :none
   defp callable_var(name, env) do
