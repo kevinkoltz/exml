@@ -19,6 +19,7 @@ defmodule ExML.CFScript.Interpreter do
     Env,
     Heap,
     Loader,
+    NativeObject,
     Query,
     Scope,
     Struct,
@@ -444,6 +445,15 @@ defmodule ExML.CFScript.Interpreter do
   @spec dispatch_member_call(any(), String.t(), [any()], map(), Env.t()) :: any()
   defp dispatch_member_call(%Instance{} = inst, name, pos, named, env) do
     invoke_method(inst, name, pos, named, env.ctx)
+  end
+
+  # Host object (e.g. a Logger-backed `request.logger`): dispatch to its native
+  # method. `:__self__` returns the object itself (builder-style chaining).
+  defp dispatch_member_call(%NativeObject{} = obj, name, pos, _named, _env) do
+    case NativeObject.invoke(obj, name, pos) do
+      :__self__ -> obj
+      result -> result
+    end
   end
 
   # Strings, arrays, and structs delegate to the member->BIF/HigherOrder glue,
