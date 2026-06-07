@@ -120,6 +120,20 @@ defmodule ExML.CFScript.LoaderTest do
     assert message =~ "tag_file_fn"
   end
 
+  test "top-level (pseudo-constructor) statements run on instantiation" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 pc = new cfc.pseudo();
+                 it("body statements initialized the variables scope", function() {
+                   assert_equal(pc.describe_state(), "base=10 total=30 label=pc");
+                 });
+               });
+               """)
+             )
+  end
+
   test "top-level `name = function(){}` loads as a callable method" do
     assert 1 ==
              passing(

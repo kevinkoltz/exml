@@ -10,15 +10,18 @@ defmodule ExML.CFScript.AST do
 
   defmodule Component do
     @moduledoc """
-    A parsed CFC: its member functions, optional `extends`, and the statements
-    from any `static { ... }` initializer block (run once into the static scope).
+    A parsed CFC: its member functions, optional `extends`, the statements from
+    any `static { ... }` block (run once into the static scope), and `init` —
+    the pseudo-constructor statements written directly in the component body
+    (`x = 5`, `foo()`), run per instance into the `variables` scope.
     """
     @type t :: %__MODULE__{
             functions: [ExML.CFScript.AST.Function.t()],
             extends: String.t() | nil,
-            static_init: [tuple()]
+            static_init: [tuple()],
+            init: [tuple()]
           }
-    defstruct functions: [], extends: nil, static_init: []
+    defstruct functions: [], extends: nil, static_init: [], init: []
   end
 
   defmodule Function do

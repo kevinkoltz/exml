@@ -58,12 +58,35 @@ defmodule ExML.CFScript.Interpreter do
   def instantiate(%AST.Component{} = component, type_path, %Context{} = ctx) do
     instance = new_instance(component, type_path)
 
-    # Run a zero-arg `init` constructor if the component defines one.
+    # Pseudo-constructor: component-body statements (`x = 5`) run first, into the
+    # instance's variables scope.
+    run_init(component.init, instance, ctx)
+
+    # Then a zero-arg `init` constructor if the component defines one.
     if function_named(component, "init") do
       _ = invoke_method(instance, "init", [], %{}, ctx)
     end
 
     instance
+  end
+
+  @spec run_init([tuple()], Instance.t(), Context.t()) :: :ok
+  defp run_init([], _instance, _ctx), do: :ok
+
+  defp run_init(stmts, %Instance{} = instance, ctx) do
+    env = %Env{
+      arguments: Scope.new(),
+      local: Scope.new(),
+      variables: instance.variables,
+      this: instance,
+      default_scope: :variables,
+      static_scope: ensure_static_scope(instance.type_path, instance.component, ctx),
+      component: instance.component,
+      type_path: instance.type_path,
+      ctx: ctx
+    }
+
+    Enum.each(stmts, &eval_stmt(&1, env))
   end
 
   @spec new_instance(AST.Component.t(), String.t()) :: Instance.t()
@@ -345,6 +368,13 @@ defmodule ExML.CFScript.Interpreter do
   defp assign({:var, name}, value, env) do
     scope = target_scope(name, env)
     Scope.put(scope, name, value)
+    value
+  end
+
+  # `this.x = v` writes the instance's public (variables) scope, mirroring how
+  # `this.x` reads it.
+  defp assign({:member, {:var, "this"}, name}, value, %Env{this: %Instance{variables: variables}}) do
+    Scope.put(variables, name, value)
     value
   end
 
@@ -1048,7 +1078,10 @@ defmodule ExML.CFScript.Interpreter do
     component = Loader.load(path, env.ctx)
     instance = new_instance(component, path)
 
-    # Run the `init` constructor (with the new-expression's args) if present.
+    # Pseudo-constructor (component-body statements) first, then the `init`
+    # constructor (with the new-expression's args) if present.
+    run_init(component.init, instance, env.ctx)
+
     if function_named(component, "init") do
       _ = invoke_method(instance, "init", pos, named, env.ctx)
     end

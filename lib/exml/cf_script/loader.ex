@@ -68,9 +68,15 @@ defmodule ExML.CFScript.Loader do
       |> Lexer.tokenize_lines()
       |> strip_component_wrapper()
 
-    {functions, static_init} = parse_members_leniently(tokens, label, [], [])
+    {functions, static_init, init} = parse_members_leniently(tokens, label, [], [], [])
     functions = attach_lines(functions, source)
-    %AST.Component{functions: functions, extends: extends, static_init: static_init}
+
+    %AST.Component{
+      functions: functions,
+      extends: extends,
+      static_init: static_init,
+      init: init
+    }
   end
 
   # Tag conversion rewrites the source and shifts lines, so the parsed AST can't
@@ -181,25 +187,40 @@ defmodule ExML.CFScript.Loader do
   defp drop_trailing_close_brace(tokens), do: tokens
 
   # Walk top-level tokens, carving each member into its own chunk: a function
-  # (parsed leniently — an unparseable one is skipped) or a `static { ... }`
-  # initializer block (whose statements accumulate into static_init).
-  @spec parse_members_leniently([Lexer.token()], String.t(), [AST.Function.t()], [tuple()]) ::
-          {[AST.Function.t()], [tuple()]}
-  defp parse_members_leniently(tokens, label, funcs, static_init) do
+  # (parsed leniently — an unparseable one is skipped), a `static { ... }` block
+  # (-> static_init), or a pseudo-constructor statement (`x = 5`) (-> init).
+  @spec parse_members_leniently(
+          [Lexer.token()],
+          String.t(),
+          [AST.Function.t()],
+          [tuple()],
+          [tuple()]
+        ) :: {[AST.Function.t()], [tuple()], [tuple()]}
+  defp parse_members_leniently(tokens, label, funcs, static_init, init) do
     case next_member_chunk(tokens) do
       :done ->
-        {Enum.reverse(funcs), static_init}
+        {Enum.reverse(funcs), static_init, init}
 
       {:function, chunk, rest} ->
         funcs = parse_one_function_lenient(chunk, label, funcs)
-        parse_members_leniently(rest, label, funcs, static_init)
+        parse_members_leniently(rest, label, funcs, static_init, init)
 
       {:static_init, inner, rest} ->
         parse_members_leniently(
           rest,
           label,
           funcs,
-          static_init ++ parse_static_init(inner, label)
+          static_init ++ parse_static_init(inner, label),
+          init
+        )
+
+      {:init, chunk, rest} ->
+        parse_members_leniently(
+          rest,
+          label,
+          funcs,
+          static_init,
+          init ++ parse_static_init(chunk, label)
         )
     end
   end
@@ -229,12 +250,15 @@ defmodule ExML.CFScript.Loader do
       []
   end
 
+  @typep member_chunk ::
+           {:function, [Lexer.token()], [Lexer.token()]}
+           | {:static_init, [Lexer.token()], [Lexer.token()]}
+           | {:init, [Lexer.token()], [Lexer.token()]}
+           | :done
+
   # Collect leading modifier idents until either a `function` keyword (a function
   # member) or a `{` directly after `static` (a static initializer block).
-  @spec next_member_chunk([Lexer.token()]) ::
-          {:function, [Lexer.token()], [Lexer.token()]}
-          | {:static_init, [Lexer.token()], [Lexer.token()]}
-          | :done
+  @spec next_member_chunk([Lexer.token()]) :: member_chunk()
   defp next_member_chunk(tokens), do: collect_member(tokens, [])
 
   @modifier_words ~w(static public private package remote final abstract)
@@ -274,10 +298,7 @@ defmodule ExML.CFScript.Loader do
   # function expression — rewrite it to a named declaration (`function name(...)
   # {...}`) so it loads like any other method. Anything else (`property`, a bare
   # variable assignment) is skipped to resync.
-  @spec member_after_ident(Lexer.token(), [Lexer.token()]) ::
-          {:function, [Lexer.token()], [Lexer.token()]}
-          | {:static_init, [Lexer.token()], [Lexer.token()]}
-          | :done
+  @spec member_after_ident(Lexer.token(), [Lexer.token()]) :: member_chunk()
   defp member_after_ident(
          name_tok,
          [{:op, "=", _}, {:ident, fw, _} = fn_tok, {:op, "(", _} = paren | rest]
@@ -286,11 +307,48 @@ defmodule ExML.CFScript.Loader do
       {body_tokens, after_body} = take_function_body([fn_tok, paren | rest], [])
       {:function, [fn_tok, name_tok | tl(body_tokens)], after_body}
     else
-      collect_member(rest, [])
+      collect_init(name_tok, [{:op, "=", nil}, fn_tok, paren | rest])
     end
   end
 
-  defp member_after_ident(_name_tok, rest), do: collect_member(rest, [])
+  defp member_after_ident(name_tok, rest), do: collect_init(name_tok, rest)
+
+  # Collect a pseudo-constructor statement (`name ... ;`) starting at `name_tok`.
+  @spec collect_init(Lexer.token(), [Lexer.token()]) ::
+          {:init, [Lexer.token()], [Lexer.token()]}
+  defp collect_init(name_tok, rest) do
+    {stmt, after_stmt} = take_init_statement(rest, [name_tok], 0)
+    {:init, stmt, after_stmt}
+  end
+
+  # Collect tokens for one top-level statement: up to and including a depth-0 `;`,
+  # or stopping (without consuming) at a depth-0 member-boundary keyword
+  # (`function`/modifier/type) or EOF.
+  @spec take_init_statement([Lexer.token()], [Lexer.token()], non_neg_integer()) ::
+          {[Lexer.token()], [Lexer.token()]}
+  defp take_init_statement([], acc, _depth), do: {Enum.reverse(acc), []}
+  defp take_init_statement([{:op, ";", _} | rest], acc, 0), do: {Enum.reverse(acc), rest}
+
+  defp take_init_statement([{:ident, w, _} | _] = tokens, acc, 0) do
+    if member_boundary?(w),
+      do: {Enum.reverse(acc), tokens},
+      else: take_init_statement(tl(tokens), [hd(tokens) | acc], 0)
+  end
+
+  defp take_init_statement([{:op, op, _} = t | rest], acc, depth) when op in ["{", "(", "["],
+    do: take_init_statement(rest, [t | acc], depth + 1)
+
+  defp take_init_statement([{:op, op, _} = t | rest], acc, depth) when op in ["}", ")", "]"],
+    do: take_init_statement(rest, [t | acc], depth - 1)
+
+  defp take_init_statement([t | rest], acc, depth),
+    do: take_init_statement(rest, [t | acc], depth)
+
+  @spec member_boundary?(String.t()) :: boolean()
+  defp member_boundary?(word) do
+    down = String.downcase(word)
+    down == "function" or down in @modifier_words or down in @type_words
+  end
 
   @spec static_only?([Lexer.token()]) :: boolean()
   defp static_only?([{:ident, word, _}]), do: String.downcase(word) == "static"
