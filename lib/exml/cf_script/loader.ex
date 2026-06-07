@@ -8,19 +8,8 @@ defmodule ExML.CFScript.Loader do
   CFCs come in several shells: pure `component {}`, `<cfscript>`-wrapped
   script, and tag components (`<cfcomponent>` with embedded `<cfscript>` blocks
   and `<cffunction>` tags). The loader strips the comment/`<cfcomponent>`/
-  `<cfscript>` shell and rewrites each `<cffunction>` into an equivalent
-  cfscript `function` declaration.
-
-  ## `<cffunction>` conversion
-
-  A `<cffunction>` is rewritten to `function name(params) { body }`:
-  `<cfargument>` tags become the parameter list, a `<cfscript>` body is
-  unwrapped, and the supported tag statements (`<cfset>`, `<cfreturn>`,
-  `<cfif>`/`<cfelseif>`/`<cfelse>`, `<cfswitch>`/`<cfcase>`/`<cfdefaultcase>`)
-  are translated to cfscript. A function whose body still contains an
-  unconverted `<cf...>` tag (e.g. `<cfquery>`, `<cfloop>`) is dropped rather
-  than emitted as broken source — the lenient parser would skip it anyway, and
-  dropping it keeps the stray tag tokens from corrupting sibling functions.
+  `<cfscript>` shell and delegates `<cffunction>`-to-cfscript rewriting to
+  `ExML.CFScript.TagConverter`.
 
   ## Lenient, function-by-function parsing
 
@@ -33,7 +22,7 @@ defmodule ExML.CFScript.Loader do
 
   require Logger
 
-  alias ExML.CFScript.{AST, Context, Lexer, Parser}
+  alias ExML.CFScript.{AST, Context, Lexer, Parser, TagConverter}
 
   @doc """
   Load and parse the component at `path` (e.g. `"cfc.common"`), using the
@@ -104,220 +93,13 @@ defmodule ExML.CFScript.Loader do
   defp preprocess(source) do
     source
     |> strip(~r/<!---.*?--->/s)
-    |> convert_cffunctions()
+    |> TagConverter.convert_cffunctions()
     |> strip(~r/<\/?cfcomponent\b[^>]*>/i)
     |> strip(~r/<\/?cfscript\s*>/i)
   end
 
   @spec strip(String.t(), Regex.t()) :: String.t()
   defp strip(source, regex), do: Regex.replace(regex, source, "")
-
-  # Rewrite each `<cffunction>...</cffunction>` to a cfscript `function`.
-  @spec convert_cffunctions(String.t()) :: String.t()
-  defp convert_cffunctions(source) do
-    Regex.replace(~r/<cffunction\b([^>]*)>(.*?)<\/cffunction>/si, source, fn _whole,
-                                                                             attrs,
-                                                                             inner ->
-      convert_one_function(attrs, inner)
-    end)
-  end
-
-  @spec convert_one_function(String.t(), String.t()) :: String.t()
-  defp convert_one_function(attrs, inner) do
-    case Map.get(parse_attrs(attrs), "name") do
-      nil ->
-        ""
-
-      name ->
-        {params, body} = extract_arguments(inner)
-        converted = convert_tag_body(body)
-        source = "function #{name}(#{params}) {\n#{converted}\n}\n"
-        if emittable?(converted, source), do: source, else: ""
-    end
-  end
-
-  # Only emit a converted function if (a) its body has no leftover unconverted
-  # CF tag and (b) it lexes cleanly on its own. The whole component is lexed in
-  # one pass, so a function with an unbalanced quote or `#` interpolation would
-  # otherwise corrupt the lexer state for every sibling that follows it. A
-  # function that lexes standalone but doesn't parse is still emitted — the
-  # lenient parser drops it later without affecting siblings.
-  @spec emittable?(String.t(), String.t()) :: boolean()
-  defp emittable?(converted_body, source) do
-    not Regex.match?(~r/<\s*\/?\s*cf/i, converted_body) and lexes?(source)
-  end
-
-  @spec lexes?(String.t()) :: boolean()
-  defp lexes?(source) do
-    Lexer.tokenize(source)
-    true
-  rescue
-    _error -> false
-  end
-
-  # Pull `<cfargument>` tags into a cfscript parameter list and return the body
-  # with those tags removed.
-  @spec extract_arguments(String.t()) :: {String.t(), String.t()}
-  defp extract_arguments(inner) do
-    params =
-      ~r/<cfargument\b([^>]*)>/i
-      |> Regex.scan(inner)
-      |> Enum.map(fn [_whole, attrs] -> param_decl(parse_attrs(attrs)) end)
-      |> Enum.join(", ")
-
-    {params, strip(inner, ~r/<cfargument\b[^>]*>/i)}
-  end
-
-  # `<cfargument name= [type=] [required=] [default=]>` -> `[required] [type] name [= default]`.
-  @spec param_decl(%{optional(String.t()) => String.t()}) :: String.t()
-  defp param_decl(attrs) do
-    type = Map.get(attrs, "type")
-    type = if type in [nil, "", "any"], do: nil, else: String.downcase(type)
-    default = Map.get(attrs, "default")
-
-    [
-      if(truthy_attr?(Map.get(attrs, "required")), do: "required"),
-      type,
-      Map.fetch!(attrs, "name"),
-      if(default, do: "= " <> literal(default))
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join(" ")
-  end
-
-  # A tag's inner text up to its real closing `>`. A `>` (or `<`) inside a
-  # single- or double-quoted string (CFML doubles an embedded quote) does not
-  # close the tag — so `<cfset x = replace(s, "&gt;", ">", "all")>` is captured
-  # whole instead of truncating at the `>` inside `">"`.
-  @tag_content ~S{(?:[^>"']|"(?:""|[^"])*"|'(?:''|[^'])*')*?}
-  @cfset_re Regex.compile!("<cfset\\s+(#{@tag_content})\\s*/?>", "i")
-  @cfreturn_expr_re Regex.compile!("<cfreturn\\s+(#{@tag_content})\\s*/?>", "i")
-  @cfif_re Regex.compile!("<cfif\\b(#{@tag_content})>", "i")
-  @cfelseif_re Regex.compile!("<cfelseif\\b(#{@tag_content})>", "i")
-  @cfswitch_re Regex.compile!("<cfswitch\\b(#{@tag_content})>", "i")
-  @cfcase_re Regex.compile!("<cfcase\\b(#{@tag_content})>", "i")
-  @cfloop_re Regex.compile!("<cfloop\\b(#{@tag_content})>", "i")
-
-  # Translate the tag statements we support into cfscript. Unsupported tags are
-  # left intact so the caller can detect and drop the function.
-  @spec convert_tag_body(String.t()) :: String.t()
-  defp convert_tag_body(body) do
-    body
-    |> strip(~r/<\/?cfscript\s*>/i)
-    |> sub(@cfset_re, fn _whole, expr -> "#{expr};" end)
-    |> sub(@cfreturn_expr_re, fn _whole, expr -> "return #{expr};" end)
-    |> strip_to(~r/<cfreturn\s*\/?>/i, "return;")
-    |> sub(@cfelseif_re, fn _whole, cond -> "} else if (#{cond}) {" end)
-    |> strip_to(~r/<cfelse\s*\/?>/i, "} else {")
-    |> sub(@cfif_re, fn _whole, cond -> "if (#{cond}) {" end)
-    |> strip_to(~r/<\/cfif\s*>/i, "}")
-    |> convert_switch_tags()
-    |> convert_loop_tags()
-  end
-
-  # <cfloop> in its two common forms; other forms (query/array/collection/
-  # condition) are left intact so the function is dropped.
-  #   from/to[/step] index  -> for (i = from; i <= to; i++) { ... }
-  #   list[/delimiters]     -> for (i in listToArray(list[, delims])) { ... }
-  @spec convert_loop_tags(String.t()) :: String.t()
-  defp convert_loop_tags(body) do
-    body
-    |> sub(@cfloop_re, fn _whole, attrs -> convert_cfloop_open(parse_attrs(attrs)) end)
-    |> strip_to(~r/<\/cfloop\s*>/i, "}")
-  end
-
-  @spec convert_cfloop_open(%{optional(String.t()) => String.t()}) :: String.t()
-  defp convert_cfloop_open(attrs) do
-    cond do
-      Map.has_key?(attrs, "from") and Map.has_key?(attrs, "to") ->
-        index = strip_hashes(Map.fetch!(attrs, "index"))
-        from = strip_hashes(Map.fetch!(attrs, "from"))
-        to = strip_hashes(Map.fetch!(attrs, "to"))
-
-        increment =
-          case Map.get(attrs, "step") do
-            nil -> "#{index}++"
-            step -> "#{index} += #{strip_hashes(step)}"
-          end
-
-        "for (#{index} = #{from}; #{index} <= #{to}; #{increment}) {"
-
-      Map.has_key?(attrs, "list") ->
-        # The loop variable is `index` (classic) or `item` (modern); for-in binds
-        # a bare name, so drop any scope prefix.
-        index =
-          (Map.get(attrs, "index") || Map.get(attrs, "item")) |> strip_hashes() |> bare_name()
-
-        list = strip_hashes(Map.fetch!(attrs, "list"))
-
-        collection =
-          case Map.get(attrs, "delimiters") do
-            nil -> "listToArray(#{list})"
-            delims -> ~s|listToArray(#{list}, "#{delims}")|
-          end
-
-        "for (#{index} in #{collection}) {"
-
-      true ->
-        # Unsupported form: leave a tag marker so the function is dropped.
-        "<cfloop>"
-    end
-  end
-
-  # The last dotted segment of a (possibly scope-qualified) name: `local.n` -> `n`.
-  @spec bare_name(String.t()) :: String.t()
-  defp bare_name(name), do: name |> String.split(".") |> List.last()
-
-  @spec convert_switch_tags(String.t()) :: String.t()
-  defp convert_switch_tags(body) do
-    body
-    |> sub(@cfswitch_re, fn _whole, attrs ->
-      expr = parse_attrs(attrs) |> Map.get("expression", "") |> strip_hashes()
-      "switch (#{expr}) {"
-    end)
-    |> sub(@cfcase_re, fn _whole, attrs ->
-      value = parse_attrs(attrs) |> Map.get("value", "")
-      "case #{literal(value)}: "
-    end)
-    |> strip_to(~r/<\/cfcase\s*>/i, " break; ")
-    |> strip_to(~r/<cfdefaultcase\s*>/i, "default: ")
-    |> strip_to(~r/<\/cfdefaultcase\s*>/i, " break; ")
-    |> strip_to(~r/<\/cfswitch\s*>/i, "}")
-  end
-
-  # Source-first wrappers around `Regex.replace/3` (so they compose in a pipe).
-  @spec sub(String.t(), Regex.t(), (String.t(), String.t() -> String.t())) :: String.t()
-  defp sub(source, regex, fun), do: Regex.replace(regex, source, fun)
-
-  @spec strip_to(String.t(), Regex.t(), String.t()) :: String.t()
-  defp strip_to(source, regex, replacement), do: Regex.replace(regex, source, replacement)
-
-  # Parse `key="value"` attribute pairs into a map of downcased key => value.
-  @spec parse_attrs(String.t()) :: %{optional(String.t()) => String.t()}
-  defp parse_attrs(attrs) do
-    ~r/([a-zA-Z_]\w*)\s*=\s*"([^"]*)"/
-    |> Regex.scan(attrs)
-    |> Map.new(fn [_whole, key, value] -> {String.downcase(key), value} end)
-  end
-
-  # Render an attribute value as a cfscript literal: numbers/booleans bare,
-  # everything else as a double-quoted string (CFML doubles embedded quotes).
-  @spec literal(String.t()) :: String.t()
-  defp literal(value) do
-    cond do
-      Regex.match?(~r/^-?\d+(\.\d+)?$/, value) -> value
-      String.downcase(value) in ["true", "false"] -> String.downcase(value)
-      true -> ~s("#{String.replace(value, "\"", "\"\"")}")
-    end
-  end
-
-  @spec truthy_attr?(String.t() | nil) :: boolean()
-  defp truthy_attr?(nil), do: false
-  defp truthy_attr?(value), do: String.downcase(value) in ["true", "yes"]
-
-  @spec strip_hashes(String.t()) :: String.t()
-  defp strip_hashes(value),
-    do: value |> String.trim() |> String.trim_leading("#") |> String.trim_trailing("#")
 
   ## Component wrapper / lenient function extraction
 

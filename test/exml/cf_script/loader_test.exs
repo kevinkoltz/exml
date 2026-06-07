@@ -88,18 +88,34 @@ defmodule ExML.CFScript.LoaderTest do
              )
   end
 
-  test "a cffunction with an unconvertible tag body (cfquery) is dropped" do
+  test "converts cfquery + cfqueryparam + cftry/cfcatch (catch path, no executor)" do
+    # No query executor is configured, so queryExecute raises; the converted
+    # cftry/cfcatch must catch it and return the catch-path value.
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("falls into the catch", function() {
+                   result = common.tag_query_fn(7);
+                   assert_true(left(result, 7) == "error: ");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "a cffunction with an unconvertible tag body (cffile) is dropped" do
     summary =
       run("""
       describe("g", function() {
-        it("has no tag_query_fn", function() {
-          common.tag_query_fn();
+        it("has no tag_file_fn", function() {
+          common.tag_file_fn();
         });
       });
       """)
 
     assert summary.failed == 1
     assert [%{status: :fail, message: message}] = summary.results
-    assert message =~ "tag_query_fn"
+    assert message =~ "tag_file_fn"
   end
 end

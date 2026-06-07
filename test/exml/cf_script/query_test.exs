@@ -82,6 +82,23 @@ defmodule ExML.CFScript.QueryTest do
              )
   end
 
+  test "query_executor: :stub returns an empty result without a database" do
+    assert 1 ==
+             passing(
+               run(
+                 """
+                 describe("q", function() {
+                   it("stubbed", function() {
+                     q = queryExecute("SELECT * FROM whatever");
+                     assert_equal(q.recordCount, 0);
+                   });
+                 });
+                 """,
+                 query_executor: :stub
+               )
+             )
+  end
+
   test "queryExecute returns a query from the executor (repo-shaped result)" do
     executor = fn _sql, _params ->
       %{columns: ["id", "name"], rows: [[1, "kevin"], [2, "jane"]]}

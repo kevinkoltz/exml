@@ -553,17 +553,21 @@ defmodule ExML.CFScript.Interpreter do
       (callable = callable_var(name, env)) != :none ->
         invoke(callable, pos, env)
 
-      sibling_function(env, name) != nil ->
-        call_sibling(sibling_function(env, name), name, pos, named, env)
-
-      Map.has_key?(env.ctx.natives, down) ->
-        invoke(Map.fetch!(env.ctx.natives, down), pos, env)
-
+      # Language built-ins take precedence over same-named user functions. CFML's
+      # `<cfthrow>` tag is the built-in throw; a UDF named `throw` (e.g. a
+      # cfscript wrapper whose body is `<cfthrow>`) must not shadow it, or the
+      # converted `throw(...)` would recurse into the wrapper forever.
       down == "throw" ->
         do_throw(pos, named)
 
       down == "queryexecute" ->
         exec_query(pos, env)
+
+      sibling_function(env, name) != nil ->
+        call_sibling(sibling_function(env, name), name, pos, named, env)
+
+      Map.has_key?(env.ctx.natives, down) ->
+        invoke(Map.fetch!(env.ctx.natives, down), pos, env)
 
       Collections.handles?(name) ->
         Collections.call(name, pos, invoker(env))
@@ -573,12 +577,13 @@ defmodule ExML.CFScript.Interpreter do
     end
   end
 
-  # throw(message=, type=, detail=) or throw("message"); raises a CFException.
+  # throw(message=, type=, detail=) or throw("message" [, "type" [, "detail"]]);
+  # raises a CFException. Named args win; positional fills message/type/detail.
   @spec do_throw([any()], map()) :: no_return()
   defp do_throw(pos, named) do
-    message = Map.get(named, "message") || List.first(pos) || ""
-    type = Map.get(named, "type", "Application")
-    detail = Map.get(named, "detail", "")
+    message = Map.get(named, "message") || Enum.at(pos, 0) || ""
+    type = Map.get(named, "type") || Enum.at(pos, 1) || "Application"
+    detail = Map.get(named, "detail") || Enum.at(pos, 2) || ""
 
     raise CFException,
       cf_type: Value.to_str(type),

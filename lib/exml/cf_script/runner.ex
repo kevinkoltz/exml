@@ -31,6 +31,10 @@ defmodule ExML.CFScript.Runner do
       `%{"request" => %{"db_name" => "appdb"}, "application" => %{...}}`.
       These would normally be set by the Application.cfc request lifecycle, which
       the interpreter does not run.
+    * `:query_executor` — `(sql, params) -> %{columns:, rows:}` backing
+      `<cfquery>`/`queryExecute`. Pass `:stub` to use a no-op that returns an
+      empty result set without touching any database — useful for exercising the
+      language without a live DB. Omitted entirely, a query raises.
   """
   @spec run_spec_file(String.t(), keyword()) :: summary()
   def run_spec_file(spec_path, opts) do
@@ -50,7 +54,7 @@ defmodule ExML.CFScript.Runner do
       cache: cache,
       natives: build_natives(),
       null_support: Keyword.get(opts, :null_support, false),
-      query_executor: Keyword.get(opts, :query_executor),
+      query_executor: resolve_executor(Keyword.get(opts, :query_executor)),
       scopes: build_scopes(Keyword.get(opts, :scopes, %{}))
     }
 
@@ -82,6 +86,12 @@ defmodule ExML.CFScript.Runner do
       {name, Scope.new(Map.get(seed, name, %{}))}
     end)
   end
+
+  # `:stub` -> a no-op executor returning an empty result (no DB). Any other
+  # value (a function or nil) passes through unchanged.
+  @spec resolve_executor(any()) :: (String.t(), any() -> map()) | nil
+  defp resolve_executor(:stub), do: fn _sql, _params -> %{columns: [], rows: []} end
+  defp resolve_executor(other), do: other
 
   @spec summarize([result()]) :: summary()
   defp summarize(results) do

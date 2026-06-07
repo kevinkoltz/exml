@@ -70,10 +70,24 @@ function multi_field_sort(required data, required array sort_fields) localmode=t
 	<cfreturn out>
 </cffunction>
 
-<!--- Unconvertible tag body (cfquery): must be dropped, not emitted broken. --->
-<cffunction name="tag_query_fn" returntype="string">
-	<cfquery name="q">SELECT 1</cfquery>
-	<cfreturn "never">
+<!--- Tag-bodied function exercising cfquery + cfqueryparam + cftry/cfcatch. --->
+<cffunction name="tag_query_fn" returntype="any">
+	<cfargument name="id" required="true">
+	<cftry>
+		<cfquery name="q" datasource="appdb">
+			SELECT name FROM widgets WHERE id = <cfqueryparam value="#arguments.id#" cfsqltype="cf_sql_integer">
+		</cfquery>
+		<cfreturn q>
+	<cfcatch type="any">
+		<cfreturn "error: #cfcatch.message#">
+	</cfcatch>
+	</cftry>
+</cffunction>
+
+<!--- Unconvertible tag body (cffile): must be dropped, not emitted broken. --->
+<cffunction name="tag_file_fn" returntype="string">
+	<cffile action="read" file="/tmp/x" variable="out">
+	<cfreturn out>
 </cffunction>
 
 </cfcomponent>

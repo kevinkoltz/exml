@@ -114,6 +114,35 @@ defmodule ExML.CFScript.ErrorHandlingTest do
     assert message =~ "Expected an exception but none was thrown"
   end
 
+  test "a user function named `throw` does not shadow the built-in (no recursion)" do
+    # Mirrors a CFML codebase that wraps the <cfthrow> tag in a `throw()` UDF.
+    # The built-in must win so the wrapper's own throw(...) raises instead of
+    # calling itself forever.
+    summary =
+      Runner.run_spec_source(
+        """
+        component {
+          function throw(message, type = "Application") {
+            throw(message = arguments.message, type = arguments.type);
+          }
+          function boom() { throw("kaboom", "MyType"); }
+          function run() {
+            describe("errors", function() {
+              it("raises via the wrapper without recursing", function() {
+                assert_throws(function() { boom(); }, "MyType", "kaboom");
+              });
+            });
+          }
+        }
+        """,
+        "inline.cfc",
+        cfc_root: @cfc_root
+      )
+
+    assert summary.failed == 0, "unexpected failures: #{inspect(summary.results)}"
+    assert summary.passed == 1
+  end
+
   test "named arguments bind by name to a method (any order)" do
     assert 1 ==
              passing(
