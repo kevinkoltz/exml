@@ -131,6 +131,13 @@ defmodule ExML.CFScript.Interpreter do
     eval_stmt(stmt, env)
   end
 
+  # A construct the parser couldn't handle (statement-level recovery) or the tag
+  # converter flagged. The rest of the function loaded; reaching this point is a
+  # loud, specific failure rather than a silent miscompile.
+  defp eval_stmt({:unsupported, reason}, _env) do
+    raise CFException, cf_type: "exml.unsupported", message: reason
+  end
+
   defp eval_stmt({:return, nil}, _env), do: throw({:return, nil})
   defp eval_stmt({:return, expr}, env), do: throw({:return, eval(expr, env)})
 
@@ -582,6 +589,12 @@ defmodule ExML.CFScript.Interpreter do
 
       down == "queryexecute" ->
         exec_query(pos, env)
+
+      # Marker emitted by the tag converter for a tag/attribute it can't support.
+      down == "__exml_unsupported" ->
+        raise CFException,
+          cf_type: "exml.unsupported",
+          message: Value.to_str(List.first(pos) || "unsupported CFML")
 
       sibling_function(env, name) != nil ->
         call_sibling(sibling_function(env, name), name, pos, named, env)

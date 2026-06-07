@@ -246,9 +246,51 @@ defmodule ExML.CFScript.Parser do
   defp parse_statements([{:op, ";", _} | rest], acc), do: parse_statements(rest, acc)
 
   defp parse_statements(tokens, acc) do
-    {stmt, rest} = parse_statement(tokens)
-    parse_statements(rest, [stmt | acc])
+    case safe_parse_statement(tokens) do
+      {:ok, stmt, rest} -> parse_statements(rest, [stmt | acc])
+      {:recover, marker, rest} -> parse_statements(rest, [marker | acc])
+    end
   end
+
+  # Statement-level recovery: if a statement doesn't parse, emit an
+  # `{:unsupported, reason}` marker (loud at runtime, line-tagged) and resync to
+  # the next statement boundary so the rest of the function still loads.
+  @spec safe_parse_statement([Lexer.token()]) ::
+          {:ok, tuple(), [Lexer.token()]} | {:recover, tuple(), [Lexer.token()]}
+  defp safe_parse_statement(tokens) do
+    {stmt, rest} = parse_statement(tokens)
+    {:ok, stmt, rest}
+  rescue
+    error ->
+      {rest, snippet} = resync(tokens, [], 0)
+      reason = "unsupported syntax (#{Exception.message(error)}) near `#{snippet}`"
+      {:recover, {:line, line_of(tokens), {:unsupported, reason}}, rest}
+  end
+
+  # Skip tokens to the next statement boundary: consume up to and including a
+  # top-level `;`, or stop before a top-level `}` (the enclosing block's close).
+  @spec resync([Lexer.token()], [Lexer.token()], non_neg_integer()) ::
+          {[Lexer.token()], String.t()}
+  defp resync([], acc, _depth), do: {[], snippet(acc)}
+  defp resync([{:op, ";", _} | rest], acc, 0), do: {rest, snippet(acc)}
+  defp resync([{:op, "}", _} | _] = tokens, acc, 0), do: {tokens, snippet(acc)}
+
+  defp resync([{:op, op, _} = t | rest], acc, depth) when op in ["{", "(", "["],
+    do: resync(rest, [t | acc], depth + 1)
+
+  defp resync([{:op, op, _} = t | rest], acc, depth) when op in ["}", ")", "]"],
+    do: resync(rest, [t | acc], depth - 1)
+
+  defp resync([t | rest], acc, depth), do: resync(rest, [t | acc], depth)
+
+  @spec snippet([Lexer.token()]) :: String.t()
+  defp snippet(reversed_tokens) do
+    reversed_tokens |> Enum.reverse() |> Enum.take(6) |> Enum.map_join(" ", &token_text/1)
+  end
+
+  @spec token_text(Lexer.token()) :: String.t()
+  defp token_text({:string, s, _}), do: ~s("#{s}")
+  defp token_text({_type, value, _}), do: to_string(value)
 
   # Parse one statement, tagging it with its source line as `{:line, n, stmt}`
   # so the interpreter can report it in backtraces.

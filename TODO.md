@@ -5,10 +5,9 @@ by area and roughly ordered by impact within each group.
 
 ## Parser / language features
 
-- [ ] **Statement-level parse recovery** — when one statement in a function body
-  doesn't parse, skip just that statement (mark it as raise-on-execute) instead
-  of dropping the whole function. Would let large hybrid functions load and run
-  their supported paths.
+- [x] **Statement-level parse recovery** — an unparseable statement becomes an
+  `{:unsupported, reason}` marker (raises a loud, line-tagged `exml.unsupported`
+  error if reached); the rest of the function still loads and runs.
 - [ ] **`do { } while ()`** loop.
 - [ ] **Inline param annotations** — `function f(numeric x hint="...")`. Today a
   trailing `hint=` on a parameter fails to parse (`expected ')'`), dropping the
@@ -18,6 +17,15 @@ by area and roughly ordered by impact within each group.
 
 ## Tag conversion coverage (`tag_converter.ex`)
 
+Unsupported tags, unsupported `<cfloop>` forms, and unknown tag attributes now
+load as `exml.unsupported` markers (assertive — they raise a specific error if
+reached) instead of being silently dropped/ignored. Remaining work is to
+actually *implement* these rather than mark them:
+
+- [ ] **Stricter attribute-implementation flagging** — the per-tag allowed sets
+  currently tolerate standard-but-unimplemented attributes (e.g. `<cfquery
+  result=>`, `maxrows=`). Tighten to the genuinely-handled set once those are
+  implemented, so the markers point only at real gaps.
 - [ ] **`<cfmodule>`** — custom-tag invocation (blocks e.g. `wo_events.event_handler`).
 - [ ] **Remaining `<cfloop>` forms** — `query=`, `collection=`, `condition=`,
   `times=` (only `from/to`, `list`, and `array` are converted today).

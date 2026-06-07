@@ -63,6 +63,23 @@ defmodule ExML.CFScript.TagConverter do
   @cfargument_re Regex.compile!("<cfargument\\b(#{@tag_content})>", "i")
   @cffunction_re Regex.compile!("<cffunction\\b(#{@tag_content})>(.*?)</cffunction>", "is")
 
+  # Attributes with no runtime effect for us — always allowed (ignored).
+  @cosmetic ~w(hint output access displayname description)
+
+  # Recognized attributes per tag. An attribute outside this set (plus cosmetic)
+  # is flagged as unsupported, so a typo or an unimplemented option surfaces as a
+  # loud error rather than being silently ignored.
+  @allowed_attrs %{
+    "cffunction" => ~w(name returntype localmode static abstract final roles modifier),
+    "cfquery" =>
+      ~w(name datasource dbtype result maxrows timeout blockfactor cachedwithin cachedafter username password),
+    "cfloop" =>
+      ~w(from to index step list array item query collection condition times delimiters group startrow endrow),
+    "cfthrow" => ~w(message type detail errorcode extendedinfo object),
+    "cfinvoke" => ~w(component method returnvariable argumentcollection),
+    "cfsavecontent" => ~w(variable trim)
+  }
+
   ## Public API
 
   @doc "Rewrite every `<cffunction>...</cffunction>` in `source` to cfscript."
@@ -106,13 +123,30 @@ defmodule ExML.CFScript.TagConverter do
       name ->
         {params, body} = extract_arguments(inner)
         converted = convert_body(body)
+        signature = "function #{name}(#{params}) #{function_suffix(attrs)}"
 
-        # Line-neutral: the signature stays on the `<cffunction>` line and `}` on
-        # the `</cffunction>` line, with the body's own newlines in between — so a
-        # converted function occupies the same source lines as the tag form, and
-        # statement line numbers map back to the original `.cfc`.
-        source = "function #{name}(#{params}) #{function_suffix(attrs)}{#{converted}}"
-        if emittable?(converted, source), do: source, else: blank_lines(whole)
+        cond do
+          # An unrecognized `<cffunction>` attribute (typo / unimplemented option).
+          bad = unknown_attr("cffunction", attrs) ->
+            marker = ~s|__exml_unsupported("function [#{name}]: unsupported attribute [#{bad}]");|
+            "#{signature}{ #{marker}#{blank_lines(converted)} }"
+
+          # An unconverted `<cf...>` tag remains: don't silently drop the function
+          # — load it with a marker body that raises (naming the tag) if called.
+          tag = leftover_cf_tag(converted) ->
+            marker =
+              ~s|__exml_unsupported("function [#{name}] uses unsupported CFML tag #{tag}");|
+
+            assertive = "#{signature}{ #{marker}#{blank_lines(converted)} }"
+            if lexes?(assertive), do: assertive, else: blank_lines(whole)
+
+          # Line-neutral: signature on the `<cffunction>` line, `}` on the
+          # `</cffunction>` line, body newlines preserved — so statement line
+          # numbers map back to the original `.cfc`.
+          true ->
+            source = "#{signature}{#{converted}}"
+            if lexes?(source), do: source, else: blank_lines(whole)
+        end
     end
   end
 
@@ -129,14 +163,32 @@ defmodule ExML.CFScript.TagConverter do
     end
   end
 
-  # Only emit a converted function if (a) its body has no leftover unconverted CF
-  # tag and (b) it lexes cleanly on its own. A function that lexes but doesn't
-  # parse is still emitted — the lenient parser drops it later in isolation.
-  @spec emittable?(String.t(), String.t()) :: boolean()
-  defp emittable?(converted_body, source) do
-    not Regex.match?(~r/<\s*\/?\s*cf/i, converted_body) and lexes?(source)
+  # The first attribute on `tag` that we don't recognize, or nil. Used to flag a
+  # typo / unimplemented option assertively.
+  @spec unknown_attr(String.t(), %{optional(String.t()) => String.t() | nil}) :: String.t() | nil
+  defp unknown_attr(tag, attrs) do
+    allowed = Map.get(@allowed_attrs, tag, []) ++ @cosmetic
+    attrs |> Map.keys() |> Enum.find(&(&1 not in allowed))
   end
 
+  # A statement that raises a clear "unsupported attribute" error if reached.
+  # Marker text avoids literal `<cf...>` so it isn't re-detected as a leftover tag.
+  @spec unsupported_stmt(String.t(), String.t()) :: String.t()
+  defp unsupported_stmt(tag, attr),
+    do: ~s|__exml_unsupported("#{tag}: unsupported attribute [#{attr}]");|
+
+  # The name of the first unconverted `<cf...>` tag still in the body, or nil.
+  @spec leftover_cf_tag(String.t()) :: String.t() | nil
+  defp leftover_cf_tag(body) do
+    case Regex.run(~r/<\s*\/?\s*(cf\w*)/i, body, capture: :all_but_first) do
+      [tag] -> String.downcase(tag)
+      nil -> nil
+    end
+  end
+
+  # Whether `source` lexes cleanly (a function whose tokens can't be lexed — e.g.
+  # an unbalanced quote — is dropped rather than corrupting sibling functions,
+  # since the whole component is lexed in one pass).
   @spec lexes?(String.t()) :: boolean()
   defp lexes?(source) do
     Lexer.tokenize(source)
@@ -225,13 +277,21 @@ defmodule ExML.CFScript.TagConverter do
   @spec convert_cfquery(String.t()) :: String.t()
   defp convert_cfquery(body) do
     Regex.replace(@cfquery_re, body, fn whole, attrs, sql ->
-      {converted_sql, params} = convert_queryparams(sql)
-      call = "queryExecute(#{quoted(converted_sql)}, {#{params}})"
+      attr_map = attrs_map(attrs)
 
       statement =
-        case attrs_map(attrs) |> Map.get("name") do
-          nil -> "#{call};"
-          name -> "#{name} = #{call};"
+        case unknown_attr("cfquery", attr_map) do
+          nil ->
+            {converted_sql, params} = convert_queryparams(sql)
+            call = "queryExecute(#{quoted(converted_sql)}, {#{params}})"
+
+            case Map.get(attr_map, "name") do
+              nil -> "#{call};"
+              name -> "#{name} = #{call};"
+            end
+
+          bad ->
+            unsupported_stmt("cfquery", bad)
         end
 
       pad_to(statement, whole)
@@ -283,10 +343,18 @@ defmodule ExML.CFScript.TagConverter do
   @spec convert_cfsavecontent(String.t()) :: String.t()
   defp convert_cfsavecontent(body) do
     Regex.replace(@cfsavecontent_re, body, fn whole, attrs, content ->
+      attr_map = attrs_map(attrs)
+
       statement =
-        case attrs_map(attrs) |> Map.get("variable") do
-          nil -> ""
-          var -> "#{var} = #{quoted(content)};"
+        case unknown_attr("cfsavecontent", attr_map) do
+          nil ->
+            case Map.get(attr_map, "variable") do
+              nil -> ""
+              var -> "#{var} = #{quoted(content)};"
+            end
+
+          bad ->
+            unsupported_stmt("cfsavecontent", bad)
         end
 
       pad_to(statement, whole)
@@ -306,11 +374,11 @@ defmodule ExML.CFScript.TagConverter do
 
   @spec build_invoke(%{optional(String.t()) => String.t() | nil}, String.t()) :: String.t()
   defp build_invoke(attrs, inner) do
-    case Map.get(attrs, "method") do
-      nil ->
-        ""
+    cond do
+      bad = unknown_attr("cfinvoke", attrs) ->
+        unsupported_stmt("cfinvoke", bad)
 
-      method ->
+      method = Map.get(attrs, "method") ->
         call =
           "#{invoke_target(Map.get(attrs, "component"))}#{method}(#{invoke_args(attrs, inner)})"
 
@@ -318,6 +386,9 @@ defmodule ExML.CFScript.TagConverter do
           nil -> "#{call};"
           ret -> "#{ret} = #{call};"
         end
+
+      true ->
+        ""
     end
   end
 
@@ -361,17 +432,23 @@ defmodule ExML.CFScript.TagConverter do
   defp convert_cfthrow(attrs_str) do
     attrs = attrs_map(attrs_str)
 
-    args =
-      ~w(message type detail)
-      |> Enum.flat_map(fn key ->
-        case Map.get(attrs, key) do
-          nil -> []
-          value -> ["#{key} = #{quoted(value)}"]
-        end
-      end)
-      |> Enum.join(", ")
+    case unknown_attr("cfthrow", attrs) do
+      nil ->
+        args =
+          ~w(message type detail)
+          |> Enum.flat_map(fn key ->
+            case Map.get(attrs, key) do
+              nil -> []
+              value -> ["#{key} = #{quoted(value)}"]
+            end
+          end)
+          |> Enum.join(", ")
 
-    "throw(#{args});"
+        "throw(#{args});"
+
+      bad ->
+        unsupported_stmt("cfthrow", bad)
+    end
   end
 
   # `<cfparam name="x" default="d">` ensures `x` is defined: assign the default
@@ -419,6 +496,9 @@ defmodule ExML.CFScript.TagConverter do
   @spec convert_cfloop_open(%{optional(String.t()) => String.t() | nil}) :: String.t()
   defp convert_cfloop_open(attrs) do
     cond do
+      bad = unknown_attr("cfloop", attrs) ->
+        "#{unsupported_stmt("cfloop", bad)} while (false) {"
+
       Map.has_key?(attrs, "from") and Map.has_key?(attrs, "to") ->
         index = strip_hashes(Map.fetch!(attrs, "index"))
         from = strip_hashes(Map.fetch!(attrs, "from"))
@@ -455,9 +535,10 @@ defmodule ExML.CFScript.TagConverter do
         "for (#{index} in #{strip_hashes(Map.fetch!(attrs, "array"))}) {"
 
       true ->
-        # Unsupported form (query/collection/condition): leave a marker so the
-        # function is dropped.
-        "<cfloop>"
+        # Unsupported form (query/collection/condition/times): a marker that
+        # raises if reached, plus a dead `while (false)` so the `</cfloop>` -> `}`
+        # stays balanced and the rest of the function still loads.
+        ~s|__exml_unsupported("unsupported cfloop form"); while (false) {|
     end
   end
 
