@@ -175,18 +175,30 @@ defmodule ExML.CFScript.Loader do
     |> Enum.join(" ")
   end
 
+  # A tag's inner text up to its real closing `>`. A `>` (or `<`) inside a
+  # single- or double-quoted string (CFML doubles an embedded quote) does not
+  # close the tag — so `<cfset x = replace(s, "&gt;", ">", "all")>` is captured
+  # whole instead of truncating at the `>` inside `">"`.
+  @tag_content ~S{(?:[^>"']|"(?:""|[^"])*"|'(?:''|[^'])*')*?}
+  @cfset_re Regex.compile!("<cfset\\s+(#{@tag_content})\\s*/?>", "i")
+  @cfreturn_expr_re Regex.compile!("<cfreturn\\s+(#{@tag_content})\\s*/?>", "i")
+  @cfif_re Regex.compile!("<cfif\\b(#{@tag_content})>", "i")
+  @cfelseif_re Regex.compile!("<cfelseif\\b(#{@tag_content})>", "i")
+  @cfswitch_re Regex.compile!("<cfswitch\\b(#{@tag_content})>", "i")
+  @cfcase_re Regex.compile!("<cfcase\\b(#{@tag_content})>", "i")
+
   # Translate the tag statements we support into cfscript. Unsupported tags are
   # left intact so the caller can detect and drop the function.
   @spec convert_tag_body(String.t()) :: String.t()
   defp convert_tag_body(body) do
     body
     |> strip(~r/<\/?cfscript\s*>/i)
-    |> sub(~r/<cfset\s+([^>]*?)\s*\/?>/i, fn _whole, expr -> "#{expr};" end)
-    |> sub(~r/<cfreturn\s+([^>]*?)\s*\/?>/i, fn _whole, expr -> "return #{expr};" end)
+    |> sub(@cfset_re, fn _whole, expr -> "#{expr};" end)
+    |> sub(@cfreturn_expr_re, fn _whole, expr -> "return #{expr};" end)
     |> strip_to(~r/<cfreturn\s*\/?>/i, "return;")
-    |> sub(~r/<cfelseif\b([^>]*?)>/i, fn _whole, cond -> "} else if (#{cond}) {" end)
+    |> sub(@cfelseif_re, fn _whole, cond -> "} else if (#{cond}) {" end)
     |> strip_to(~r/<cfelse\s*\/?>/i, "} else {")
-    |> sub(~r/<cfif\b([^>]*?)>/i, fn _whole, cond -> "if (#{cond}) {" end)
+    |> sub(@cfif_re, fn _whole, cond -> "if (#{cond}) {" end)
     |> strip_to(~r/<\/cfif\s*>/i, "}")
     |> convert_switch_tags()
   end
@@ -194,11 +206,11 @@ defmodule ExML.CFScript.Loader do
   @spec convert_switch_tags(String.t()) :: String.t()
   defp convert_switch_tags(body) do
     body
-    |> sub(~r/<cfswitch\b([^>]*)>/i, fn _whole, attrs ->
+    |> sub(@cfswitch_re, fn _whole, attrs ->
       expr = parse_attrs(attrs) |> Map.get("expression", "") |> strip_hashes()
       "switch (#{expr}) {"
     end)
-    |> sub(~r/<cfcase\b([^>]*)>/i, fn _whole, attrs ->
+    |> sub(@cfcase_re, fn _whole, attrs ->
       value = parse_attrs(attrs) |> Map.get("value", "")
       "case #{literal(value)}: "
     end)
