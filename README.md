@@ -110,6 +110,16 @@ The standalone library has no database, so without an executor it raises; a host
 application injects a repo-backed one. `options` supports `returnType` `"query"`
 (default) and `"array"` (array of row structs).
 
+### Predefined scopes
+
+The interpreter does not run the `Application.cfc` request lifecycle, so the
+run-wide CFML scopes it would populate (`request`, `application`, `cgi`,
+`server`, `url`, `form`) are instead **seeded by the host** via the `:scopes`
+Runner option, e.g. `%{"request" => %{"db_name" => "appdb"}}`. They are
+readable and writable (`request.flash = "x"`) and live for the run. Unqualified
+reads do not fall through to these scopes (no scope-hunt). `client`/`session`
+are not modelled yet.
+
 ### Null support
 
 `isNull`/missing-key behavior follows Lucee's full-null-support setting via a
@@ -119,12 +129,12 @@ raises rather than yielding null.
 
 ## Goals / roadmap
 
-* `for`/`for-in`/`while` loops, `switch`, ternary, `assert_throws`, arrow
-  functions, `static.` scope (needed to run the larger monolithic specs)
+* `switch`/`case`, ternary `?:` / elvis, `do/while`
 * `<cfquery>` tag (script world uses `queryExecute`; the tag matters once
   tag-based `<cffunction>` bodies are interpreted)
 * Statement-level parse recovery (skip an unsupported statement, keep the rest)
 * Timezone-aware `dateConvert` (currently a pass-through)
+* `client`/`session` scopes; a wider tail of BIFs
 
 ## Installation
 

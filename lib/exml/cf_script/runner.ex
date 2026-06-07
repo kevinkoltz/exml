@@ -9,7 +9,7 @@ defmodule ExML.CFScript.Runner do
   `.cfc` sources under `cfc_root`.
   """
 
-  alias ExML.CFScript.{CFException, Context, Interpreter, Loader, Reporter, Value}
+  alias ExML.CFScript.{CFException, Context, Interpreter, Loader, Reporter, Scope, Value}
   alias ExML.CFScript.Value.Native
 
   @type result :: Reporter.result()
@@ -27,6 +27,10 @@ defmodule ExML.CFScript.Runner do
     * `:cfc_root` (required) — directory the `cfc.*` mapping resolves against.
     * `:null_support` (default `false`) — Lucee full-null-support mode. Off (the
       common default) makes missing-key access raise; on yields null.
+    * `:scopes` — seed values for the predefined CFML scopes, e.g.
+      `%{"request" => %{"db_name" => "appdb"}, "application" => %{...}}`.
+      These would normally be set by the Application.cfc request lifecycle, which
+      the interpreter does not run.
   """
   @spec run_spec_file(String.t(), keyword()) :: summary()
   def run_spec_file(spec_path, opts) do
@@ -46,7 +50,8 @@ defmodule ExML.CFScript.Runner do
       cache: cache,
       natives: build_natives(),
       null_support: Keyword.get(opts, :null_support, false),
-      query_executor: Keyword.get(opts, :query_executor)
+      query_executor: Keyword.get(opts, :query_executor),
+      scopes: build_scopes(Keyword.get(opts, :scopes, %{}))
     }
 
     try do
@@ -67,6 +72,15 @@ defmodule ExML.CFScript.Runner do
     after
       Agent.stop(cache)
     end
+  end
+
+  # Create a fresh mutable Scope for each predefined CFML scope, seeded from the
+  # host-provided `:scopes` map (e.g. %{"request" => %{"db_name" => "..."}}).
+  @spec build_scopes(map()) :: %{optional(String.t()) => reference()}
+  defp build_scopes(seed) do
+    Map.new(Interpreter.predefined_scopes(), fn name ->
+      {name, Scope.new(Map.get(seed, name, %{}))}
+    end)
   end
 
   @spec summarize([result()]) :: summary()

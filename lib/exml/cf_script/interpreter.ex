@@ -36,7 +36,18 @@ defmodule ExML.CFScript.Interpreter do
     StructRef
   }
 
+  # Call-frame scopes (held on the Env).
   @scopes ~w(arguments local variables this static)
+
+  # Run-wide predefined CFML scopes (held on Context.scopes), normally populated
+  # by the Application.cfc request lifecycle, which we don't run — the host seeds
+  # them instead. `client`/`session` are intentionally not modelled.
+  @predefined_scopes ~w(request application cgi server url form)
+  @all_scopes @scopes ++ @predefined_scopes
+
+  @doc "The run-wide predefined CFML scope names (for the host to seed)."
+  @spec predefined_scopes() :: [String.t()]
+  def predefined_scopes, do: @predefined_scopes
 
   ## Public entry points
 
@@ -258,7 +269,7 @@ defmodule ExML.CFScript.Interpreter do
     value
   end
 
-  defp assign({:member, {:var, scope_kw}, name}, value, env) when scope_kw in @scopes do
+  defp assign({:member, {:var, scope_kw}, name}, value, env) when scope_kw in @all_scopes do
     Scope.put(scope_ref(scope_kw, env), name, value)
     value
   end
@@ -316,7 +327,7 @@ defmodule ExML.CFScript.Interpreter do
   defp eval({:lit, value}, _env), do: value
 
   # Scope-qualified read: arguments.x / local.x / variables.x / this.x
-  defp eval({:member, {:var, scope_kw}, name}, env) when scope_kw in @scopes do
+  defp eval({:member, {:var, scope_kw}, name}, env) when scope_kw in @all_scopes do
     read_scope_member(scope_kw, name, env)
   end
 
@@ -408,7 +419,7 @@ defmodule ExML.CFScript.Interpreter do
   end
 
   # Member call: obj.method(args) — instance method or string member function.
-  defp eval_call({:member, {:var, scope_kw}, name}, args, env) when scope_kw in @scopes do
+  defp eval_call({:member, {:var, scope_kw}, name}, args, env) when scope_kw in @all_scopes do
     {pos, named} = eval_args(args, env)
     dispatch_member_call(read_scope_value(scope_kw, env), name, pos, named, env)
   end
@@ -786,6 +797,14 @@ defmodule ExML.CFScript.Interpreter do
   defp scope_ref("variables", env), do: env.variables
   defp scope_ref("static", env), do: env.static_scope
 
+  # Predefined run-wide scopes (request/application/cgi/...) live on the context.
+  defp scope_ref(name, env) do
+    case Map.fetch(env.ctx.scopes, name) do
+      {:ok, scope} -> scope
+      :error -> raise CFException, message: "Scope '#{name}' is not available"
+    end
+  end
+
   @spec resolve_var(String.t(), Env.t()) :: any()
   defp resolve_var(name, env) do
     down = String.downcase(name)
@@ -794,7 +813,7 @@ defmodule ExML.CFScript.Interpreter do
       down == "cfc" ->
         %Namespace{base: "cfc"}
 
-      down in ["arguments", "local", "variables"] ->
+      down in ["arguments", "local", "variables"] or down in @predefined_scopes ->
         read_scope_value(down, env)
 
       down == "this" ->
