@@ -65,10 +65,17 @@ defmodule ExML.CFScript.Collections do
     down = String.downcase(name)
 
     cond do
-      down == "duplicate" -> deep_copy(hd(args))
-      down in @mutators -> mutate(down, args)
-      HigherOrder.higher_order?(down) -> wrap(HigherOrder.call(down, deref_all(args), invoke))
-      true -> wrap(Registry.call(down, deref_all(args)))
+      down == "duplicate" ->
+        deep_copy(hd(args))
+
+      down in @mutators ->
+        mutate(down, args)
+
+      HigherOrder.higher_order?(down) ->
+        wrap(HigherOrder.call(down, deref_collection(args), invoke))
+
+      true ->
+        wrap(Registry.call(down, deref_all(args)))
     end
   end
 
@@ -149,6 +156,14 @@ defmodule ExML.CFScript.Collections do
 
   @spec deref_all([any()]) :: [any()]
   defp deref_all(args), do: Enum.map(args, &Heap.deref/1)
+
+  # Higher-order calls iterate only the first argument (the collection), so deref
+  # just that and leave the UDF and any seed/accumulator as-is. This keeps the
+  # accumulator a live reference, so a closure can mutate it in place — e.g.
+  # `params.reduce((r, k, v) => { r[k] = ...; return r; }, params)`.
+  @spec deref_collection([any()]) :: [any()]
+  defp deref_collection([]), do: []
+  defp deref_collection([collection | rest]), do: [Heap.deref(collection) | rest]
 
   # Raw list/map/query results become fresh references; scalars pass through.
   @spec wrap(any()) :: any()

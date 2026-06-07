@@ -147,4 +147,24 @@ defmodule ExML.CFScript.ReferenceSemanticsTest do
                """)
              )
   end
+
+  test "reduce can mutate a struct accumulator in place (the seed stays a reference)" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("builds a struct via reduce", function() {
+                   src = {a: 1, b: 2, c: 3};
+                   out = src.reduce((result, key, value) => {
+                     result[key] = value * 10;
+                     return result;
+                   }, {});
+                   assert_equal(out.a, 10);
+                   assert_equal(out.b, 20);
+                   assert_equal(out.c, 30);
+                 });
+               });
+               """)
+             )
+  end
 end
