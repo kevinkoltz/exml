@@ -194,6 +194,15 @@ defmodule ExML.CFScript.Interpreter do
     end)
   end
 
+  # do/while: run the body once, then keep going while the condition holds.
+  defp eval_stmt({:do_while, body, cond_expr}, env) do
+    Enum.each(body, &eval_stmt(&1, env))
+
+    loop_while(fn -> Value.truthy?(eval(cond_expr, env)) end, fn ->
+      Enum.each(body, &eval_stmt(&1, env))
+    end)
+  end
+
   # break/continue unwind via throw, caught by the enclosing switch (break only).
   defp eval_stmt({:break}, _env), do: throw(:break)
   defp eval_stmt({:continue}, _env), do: throw(:continue)

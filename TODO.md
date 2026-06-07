@@ -8,7 +8,7 @@ by area and roughly ordered by impact within each group.
 - [x] **Statement-level parse recovery** — an unparseable statement becomes an
   `{:unsupported, reason}` marker (raises a loud, line-tagged `exml.unsupported`
   error if reached); the rest of the function still loads and runs.
-- [ ] **`do { } while ()`** loop.
+- [x] **`do { } while ()`** loop.
 - [ ] **Inline param annotations** — `function f(numeric x hint="...")`. Today a
   trailing `hint=` on a parameter fails to parse (`expected ')'`), dropping the
   function.

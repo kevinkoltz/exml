@@ -312,6 +312,7 @@ defmodule ExML.CFScript.Parser do
       kw?(w, "var") -> parse_var(rest)
       kw?(w, "for") -> parse_for(rest)
       kw?(w, "while") -> parse_while(rest)
+      kw?(w, "do") -> parse_do_while(rest)
       kw?(w, "try") -> parse_try(rest)
       kw?(w, "switch") -> parse_switch(rest)
       kw?(w, "break") -> {{:break}, drop_semicolon(rest)}
@@ -536,6 +537,17 @@ defmodule ExML.CFScript.Parser do
     tokens = expect_op(tokens, ")")
     {body, tokens} = parse_block_or_statement(tokens)
     {{:while, cond_expr, body}, tokens}
+  end
+
+  # `do { body } while (cond)` — body runs once, then repeats while cond is true.
+  @spec parse_do_while([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_do_while(tokens) do
+    {body, tokens} = parse_block_or_statement(tokens)
+    tokens = expect_ident(tokens, "while")
+    tokens = expect_op(tokens, "(")
+    {cond_expr, tokens} = parse_expr(tokens)
+    tokens = expect_op(tokens, ")")
+    {{:do_while, body, cond_expr}, drop_semicolon(tokens)}
   end
 
   # try { ... } catch (Type e) { ... } ... [finally { ... }]

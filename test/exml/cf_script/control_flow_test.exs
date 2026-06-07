@@ -135,6 +135,37 @@ defmodule ExML.CFScript.ControlFlowTest do
              )
   end
 
+  test "do/while loops while the condition holds" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("counts up", function() {
+                   n = 0;
+                   out = "";
+                   do { out &= n; n++; } while (n < 3);
+                   assert_equal(out, "012");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "do/while always runs the body at least once" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("runs once when cond is false", function() {
+                   ran = 0;
+                   do { ran++; } while (false);
+                   assert_equal(ran, 1);
+                 });
+               });
+               """)
+             )
+  end
+
   test "arrow functions: block body and implicit-return expression" do
     assert 1 ==
              passing(
