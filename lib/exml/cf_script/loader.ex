@@ -52,6 +52,16 @@ defmodule ExML.CFScript.Loader do
     end
   end
 
+  @doc """
+  Whether a component file exists for `path` (e.g. `"cfc.pkg.thing"`).
+
+  Used to tell a leaf component (`cfc.foo` -> `foo.cfc`) from an intermediate
+  package segment (`cfc.pkg` -> a directory, no `pkg.cfc`) when resolving a
+  dotted path.
+  """
+  @spec exists?(String.t(), Context.t()) :: boolean()
+  def exists?(path, %Context{} = ctx), do: File.exists?(file_for(path, ctx))
+
   @doc "Parse a `.cfc` file from disk into an `AST.Component`."
   @spec parse_file(String.t()) :: AST.Component.t()
   def parse_file(file) do
@@ -233,8 +243,11 @@ defmodule ExML.CFScript.Loader do
         "for (#{index} = #{from}; #{index} <= #{to}; #{increment}) {"
 
       Map.has_key?(attrs, "list") ->
-        # for-in binds a bare name, so drop any scope prefix on the index.
-        index = attrs |> Map.fetch!("index") |> strip_hashes() |> bare_name()
+        # The loop variable is `index` (classic) or `item` (modern); for-in binds
+        # a bare name, so drop any scope prefix.
+        index =
+          (Map.get(attrs, "index") || Map.get(attrs, "item")) |> strip_hashes() |> bare_name()
+
         list = strip_hashes(Map.fetch!(attrs, "list"))
 
         collection =

@@ -97,6 +97,9 @@ defmodule ExML.CFScript.Interpreter do
       static_scope: cenv.static_scope,
       component: cenv.component,
       type_path: cenv.type_path,
+      # Lexical capture: the closure can read the defining function's locals
+      # (and those of any function enclosing it).
+      enclosing: [cenv.local | cenv.enclosing],
       ctx: cenv.ctx
     }
 
@@ -342,6 +345,11 @@ defmodule ExML.CFScript.Interpreter do
         Heap.write(ref, Struct.put(Heap.deref(ref), Value.to_str(key), value))
         value
 
+      # `inst["x"] = v` writes the public (variables) scope, like `inst.x = v`.
+      %Instance{variables: variables} ->
+        Scope.put(variables, Value.to_str(key), value)
+        value
+
       other ->
         raise CFException, message: "Cannot assign by index on #{Value.display(other)}"
     end
@@ -405,6 +413,10 @@ defmodule ExML.CFScript.Interpreter do
     key = eval(key_ast, env)
 
     case Heap.deref(obj) do
+      # A component instance indexed by key reads its public (variables) scope —
+      # `inst["x"]` is equivalent to `inst.x`. Checked before the generic map
+      # clause since an `%Instance{}` is itself an Elixir struct (a map).
+      %Instance{} = inst -> eval_member(inst, Value.to_str(key), env)
       list when is_list(list) -> array_index(list, Value.to_number(key))
       m when is_map(m) -> struct_index(m, String.downcase(Value.to_str(key)), env)
       other -> raise CFException, message: "Cannot index #{Value.display(other)}"
@@ -760,8 +772,17 @@ defmodule ExML.CFScript.Interpreter do
   ## Member / scope reads
 
   @spec eval_member(any(), String.t(), Env.t()) :: any()
+  # A namespace member is a deeper component path. If a component file exists at
+  # that path it's a leaf component (`cfc.foo` -> foo.cfc); otherwise it's a
+  # package segment, so extend the namespace (`cfc.pkg` -> a directory).
   defp eval_member(%Namespace{base: base}, name, env) do
-    resolve_component_type_by_path("#{base}.#{name}", env.ctx)
+    path = "#{base}.#{name}"
+
+    if Loader.exists?(path, env.ctx) do
+      resolve_component_type_by_path(path, env.ctx)
+    else
+      %Namespace{base: path}
+    end
   end
 
   defp eval_member(%Instance{variables: variables}, name, env) do
@@ -913,10 +934,22 @@ defmodule ExML.CFScript.Interpreter do
   defp lookup_scopes(name, env) do
     with :error <- Scope.fetch(env.local, name),
          :error <- Scope.fetch(env.arguments, name),
-         :error <- Scope.fetch(env.variables, name) do
+         :error <- Scope.fetch(env.variables, name),
+         :error <- lookup_enclosing(env.enclosing, name) do
       :none
     else
       {:ok, value} -> value
+    end
+  end
+
+  # Walk captured enclosing local scopes (innermost first) for a closure read.
+  @spec lookup_enclosing([Scope.t()], String.t()) :: {:ok, any()} | :error
+  defp lookup_enclosing([], _name), do: :error
+
+  defp lookup_enclosing([scope | rest], name) do
+    case Scope.fetch(scope, name) do
+      :error -> lookup_enclosing(rest, name)
+      {:ok, value} -> {:ok, value}
     end
   end
 

@@ -12,6 +12,8 @@ defmodule ExML.CFScript.Env do
     * `component`  — the `AST.Component` currently executing (for sibling-method
       resolution, including from static methods where `this` is nil)
     * `type_path`  — the component's path (keys its static scope)
+    * `enclosing`  — captured `local` scopes of lexically-enclosing functions
+      (a closure can read its defining function's locals); innermost first
     * `ctx`       — `ExML.CFScript.Context`, shared across the whole run
   """
 
@@ -26,6 +28,7 @@ defmodule ExML.CFScript.Env do
           static_scope: Scope.t() | nil,
           component: term(),
           type_path: String.t() | nil,
+          enclosing: [Scope.t()],
           ctx: term()
         }
 
@@ -38,6 +41,7 @@ defmodule ExML.CFScript.Env do
     :static_scope,
     :component,
     :type_path,
+    {:enclosing, []},
     :ctx
   ]
 end

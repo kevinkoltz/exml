@@ -64,7 +64,7 @@ function multi_field_sort(required data, required array sort_fields) localmode=t
 <cffunction name="tag_list_loop_fn" returntype="string">
 	<cfargument name="items" required="true">
 	<cfset var out = "">
-	<cfloop list="#arguments.items#" index="local.item">
+	<cfloop list="#arguments.items#" item="local.item">
 		<cfset out = out & ucase(item)>
 	</cfloop>
 	<cfreturn out>
