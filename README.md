@@ -70,6 +70,13 @@ Lucee 6.2.5 sources and scoped to what a real CFML codebase uses:
   `queryColumnData`, `queryColumnList`, `queryRecordCount`, `queryGetRow`,
   `queryColumnExists`, `valueList`, `valueArray`, plus `q.recordCount`,
   `q.columnList`, and `q.column[row]` access
+* **Date** — `now`, `createDate`, `createTime`, `createDateTime`,
+  `createTimeSpan`, `year`/`month`/`day`/`hour`/`minute`/`second`/`quarter`/
+  `week`/`dayOfYear`/`daysInMonth`/`dayOfWeek`, `dateAdd`, `dateDiff`,
+  `datePart`, `dateCompare`, `dateFormat`, `timeFormat`, `dateTimeFormat`,
+  `parseDateTime`. Dates are timezone-naive `NaiveDateTime`; numeric coercion is
+  the CFML date serial (so dates compare/order numerically). `dateConvert` is a
+  pass-through (no timezone shift).
 * **Higher-order** (`ExML.CFScript.HigherOrder`, take UDF callbacks) —
   `arrayMap/Filter/Reduce/Each/Some/Every` and `structEach/Map/Filter/Reduce`
 
@@ -114,7 +121,7 @@ raises rather than yielding null.
 * `<cfquery>` tag (script world uses `queryExecute`; the tag matters once
   tag-based `<cffunction>` bodies are interpreted)
 * Statement-level parse recovery (skip an unsupported statement, keep the rest)
-* Date/query function families
+* Timezone-aware `dateConvert` (currently a pass-through)
 
 ## Installation
 

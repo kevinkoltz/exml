@@ -11,6 +11,7 @@ defmodule ExML.CFScript.BIF.Registry do
   alias ExML.CFScript.BIF.{
     ArrayFns,
     ConversionFns,
+    DateFns,
     DecisionFns,
     ListFns,
     QueryFns,
@@ -18,7 +19,16 @@ defmodule ExML.CFScript.BIF.Registry do
     StructFns
   }
 
-  @families [StringFns, DecisionFns, ListFns, ArrayFns, StructFns, QueryFns, ConversionFns]
+  @families [
+    StringFns,
+    DecisionFns,
+    ListFns,
+    ArrayFns,
+    StructFns,
+    QueryFns,
+    ConversionFns,
+    DateFns
+  ]
 
   @table for family <- @families,
              name <- family.names(),

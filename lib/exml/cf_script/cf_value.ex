@@ -166,6 +166,26 @@ defimpl ExML.CFScript.CFValue, for: List do
   def type_name(_array), do: :array
 end
 
+# CFML dates (modelled as NaiveDateTime). Numeric coercion is the CFML date
+# serial, so dates compare and order numerically as in Lucee.
+defimpl ExML.CFScript.CFValue, for: NaiveDateTime do
+  def to_str(ndt), do: ExML.CFScript.CFDate.format(ndt, "yyyy-mm-dd HH:nn:ss", false)
+  def as_number(ndt), do: {:ok, ExML.CFScript.CFDate.serial(ndt)}
+  def truthy?(_ndt), do: true
+  def type_name(_ndt), do: :date
+end
+
+defimpl ExML.CFScript.CFValue, for: Date do
+  def to_str(date),
+    do: ExML.CFScript.CFDate.format(NaiveDateTime.new!(date, ~T[00:00:00]), "yyyy-mm-dd", false)
+
+  def as_number(date),
+    do: {:ok, ExML.CFScript.CFDate.serial(NaiveDateTime.new!(date, ~T[00:00:00]))}
+
+  def truthy?(_date), do: true
+  def type_name(_date), do: :date
+end
+
 # Mutable reference types (heap-backed). Same coercion as their raw list/map
 # counterparts, but carried as references so mutation is shared.
 defimpl ExML.CFScript.CFValue, for: ExML.CFScript.Value.ArrayRef do

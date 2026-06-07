@@ -88,9 +88,9 @@ defmodule ExML.CFScript.Value do
     end
   end
 
-  @doc "Whether a value is a CFML \"simple\" value (string / number / boolean)."
+  @doc "Whether a value is a CFML \"simple\" value (string / number / boolean / date)."
   @spec simple?(any()) :: boolean()
-  def simple?(value), do: type_name(value) in [:string, :number, :boolean]
+  def simple?(value), do: type_name(value) in [:string, :number, :boolean, :date]
 
   ## Binary operations
 

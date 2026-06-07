@@ -13,7 +13,7 @@ defmodule ExML.CFScript.BIF.DecisionFns do
   # the isNumeric predicate).
   @numeric_regex ~r/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/
 
-  @names ~w(isnull issimplevalue isnumeric isboolean isarray isstruct isempty isdefined isobject isquery)
+  @names ~w(isnull issimplevalue isnumeric isboolean isarray isstruct isempty isdefined isobject isquery isdate)
 
   @impl true
   def names, do: @names
@@ -21,8 +21,14 @@ defmodule ExML.CFScript.BIF.DecisionFns do
   @impl true
   def call("isnull", [v]), do: is_nil(v)
 
-  # isSimpleValue: string / number / boolean / date (dates not modelled yet).
+  # isSimpleValue: string / number / boolean / date.
   def call("issimplevalue", [v]), do: Value.simple?(v)
+
+  # isDate: a date value, or a string that parses as a date. Numbers are not dates.
+  def call("isdate", [%NaiveDateTime{}]), do: true
+  def call("isdate", [%Date{}]), do: true
+  def call("isdate", [v]) when is_binary(v), do: ExML.CFScript.CFDate.parseable?(v)
+  def call("isdate", [_v]), do: false
 
   # isNumeric: real numbers, or strings matching the numeric grammar. Booleans
   # are NOT numeric in Lucee.

@@ -143,19 +143,31 @@ defmodule ExML.CFScript.Lexer do
   defp skip_block_comment(""), do: ""
 
   # Read a string body until the matching closing quote. A doubled quote
-  # (`""` or `''`) is an escaped literal quote, matching CFML semantics.
+  # (`""` / `''`) is an escaped literal quote. The body is interpolation-aware:
+  # a `#` toggles in/out of a `#...#` region, and inside such a region the quote
+  # char does NOT terminate the string (so nested quotes like
+  # `"#fn(x, "y")#"` work). The `#` characters are kept in the content for the
+  # parser to split on.
   @spec read_string(binary(), char(), binary()) :: {binary(), binary()}
-  defp read_string(<<q::utf8, q::utf8, rest::binary>>, q, acc) do
-    read_string(rest, q, <<acc::binary, q::utf8>>)
+  defp read_string(bin, q, acc), do: read_string(bin, q, acc, false)
+
+  @spec read_string(binary(), char(), binary(), boolean()) :: {binary(), binary()}
+  defp read_string(<<q::utf8, q::utf8, rest::binary>>, q, acc, false) do
+    read_string(rest, q, <<acc::binary, q::utf8>>, false)
   end
 
-  defp read_string(<<q::utf8, rest::binary>>, q, acc), do: {acc, rest}
-
-  defp read_string(<<c::utf8, rest::binary>>, q, acc) do
-    read_string(rest, q, <<acc::binary, c::utf8>>)
+  defp read_string(<<?#, rest::binary>>, q, acc, in_interp) do
+    read_string(rest, q, <<acc::binary, ?#>>, not in_interp)
   end
 
-  defp read_string("", _q, _acc), do: raise("ExML.CFScript.Lexer: unterminated string")
+  defp read_string(<<q::utf8, rest::binary>>, q, acc, false), do: {acc, rest}
+
+  defp read_string(<<c::utf8, rest::binary>>, q, acc, in_interp) do
+    read_string(rest, q, <<acc::binary, c::utf8>>, in_interp)
+  end
+
+  defp read_string("", _q, _acc, _in_interp),
+    do: raise("ExML.CFScript.Lexer: unterminated string")
 
   @spec read_number(binary()) :: {token(), binary()}
   defp read_number(bin) do
