@@ -538,7 +538,31 @@ defmodule ExML.CFScript.Parser do
   ## Expressions (precedence climbing)
 
   @spec parse_expr([Lexer.token()]) :: {tuple(), [Lexer.token()]}
-  def parse_expr(tokens), do: parse_or(tokens)
+  def parse_expr(tokens), do: parse_ternary(tokens)
+
+  # Lowest-precedence operators, right-associative:
+  #   cond ? then : else   (ternary)
+  #   value ?: default      (elvis — `default` when `value` is null/undefined)
+  # The lexer emits `?:` as adjacent `?` and `:` tokens.
+  @spec parse_ternary([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_ternary(tokens) do
+    {head, rest} = parse_or(tokens)
+
+    case rest do
+      [{:op, "?"}, {:op, ":"} | rest] ->
+        {default, rest} = parse_ternary(rest)
+        {{:elvis, head, default}, rest}
+
+      [{:op, "?"} | rest] ->
+        {then_expr, rest} = parse_ternary(rest)
+        rest = expect_op(rest, ":")
+        {else_expr, rest} = parse_ternary(rest)
+        {{:ternary, head, then_expr, else_expr}, rest}
+
+      _ ->
+        {head, rest}
+    end
+  end
 
   defp parse_or(tokens), do: parse_binop_level(tokens, &parse_and/1, [{"or", "or"}, {"||", "or"}])
 

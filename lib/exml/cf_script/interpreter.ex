@@ -363,8 +363,33 @@ defmodule ExML.CFScript.Interpreter do
 
   ## Expression evaluation
 
+  # Evaluate an expression, treating an undefined variable/key as "absent"
+  # rather than an error. Used by the elvis operator's null-safe left side.
+  @spec safe_eval(tuple(), Env.t()) :: {:ok, any()} | :absent
+  defp safe_eval(expr, env) do
+    {:ok, eval(expr, env)}
+  rescue
+    CFException -> :absent
+  end
+
   @spec eval(tuple(), Env.t()) :: any()
   defp eval({:lit, value}, _env), do: value
+
+  # cond ? then : else
+  defp eval({:ternary, cond_expr, then_expr, else_expr}, env) do
+    if Value.truthy?(eval(cond_expr, env)),
+      do: eval(then_expr, env),
+      else: eval(else_expr, env)
+  end
+
+  # value ?: default — the default applies when `value` is null or refers to an
+  # undefined variable/key (Lucee evaluates the left safely, without throwing).
+  defp eval({:elvis, value_expr, default_expr}, env) do
+    case safe_eval(value_expr, env) do
+      {:ok, value} when not is_nil(value) -> value
+      _absent_or_nil -> eval(default_expr, env)
+    end
+  end
 
   # Scope-qualified read: arguments.x / local.x / variables.x / this.x
   defp eval({:member, {:var, scope_kw}, name}, env) when scope_kw in @all_scopes do
