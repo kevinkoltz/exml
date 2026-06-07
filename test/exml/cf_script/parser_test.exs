@@ -60,7 +60,9 @@ defmodule ExML.CFScript.ParserTest do
       assert %AST.Component{functions: [func]} = Parser.parse_component(src)
       assert %AST.Function{name: "capitalize", params: [%AST.Param{name: "str"}]} = func
       assert length(func.body) == 3
-      assert [{:if, _, _, _}, {:if, _, _, _}, {:return, _}] = func.body
+      # statements are line-tagged: {:line, n, stmt}
+      assert [{:line, _, {:if, _, _, _}}, {:line, _, {:if, _, _, _}}, {:line, _, {:return, _}}] =
+               func.body
     end
 
     test "parses static + return type + extends attribute" do
@@ -94,7 +96,8 @@ defmodule ExML.CFScript.ParserTest do
       assert %AST.Component{functions: [%AST.Function{name: "run", body: body}]} =
                Parser.parse_component(src)
 
-      assert [{:expr, {:call, {:var, "describe"}, [{:lit, "group"}, {:fun, [], _}]}}] = body
+      assert [{:line, _, {:expr, {:call, {:var, "describe"}, [{:lit, "group"}, {:fun, [], _}]}}}] =
+               body
     end
   end
 end

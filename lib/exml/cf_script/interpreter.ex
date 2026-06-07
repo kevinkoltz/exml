@@ -124,6 +124,13 @@ defmodule ExML.CFScript.Interpreter do
   end
 
   @spec eval_stmt(tuple(), Env.t()) :: any()
+  # A line-tagged statement: record the line on the current frame (for
+  # backtraces), then evaluate the wrapped statement.
+  defp eval_stmt({:line, line, stmt}, env) do
+    CallStack.set_line(line)
+    eval_stmt(stmt, env)
+  end
+
   defp eval_stmt({:return, nil}, _env), do: throw({:return, nil})
   defp eval_stmt({:return, expr}, env), do: throw({:return, eval(expr, env)})
 

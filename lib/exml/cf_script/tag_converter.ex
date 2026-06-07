@@ -68,8 +68,8 @@ defmodule ExML.CFScript.TagConverter do
   @doc "Rewrite every `<cffunction>...</cffunction>` in `source` to cfscript."
   @spec convert_cffunctions(String.t()) :: String.t()
   def convert_cffunctions(source) do
-    Regex.replace(@cffunction_re, source, fn _whole, attrs, inner ->
-      convert_one_function(attrs, inner)
+    Regex.replace(@cffunction_re, source, fn whole, attrs, inner ->
+      convert_one_function(attrs, inner, whole)
     end)
   end
 
@@ -95,19 +95,24 @@ defmodule ExML.CFScript.TagConverter do
 
   ## <cffunction> -> function
 
-  @spec convert_one_function(String.t(), String.t()) :: String.t()
-  defp convert_one_function(attrs_str, inner) do
+  @spec convert_one_function(String.t(), String.t(), String.t()) :: String.t()
+  defp convert_one_function(attrs_str, inner, whole) do
     attrs = attrs_map(attrs_str)
 
     case Map.get(attrs, "name") do
       nil ->
-        ""
+        blank_lines(whole)
 
       name ->
         {params, body} = extract_arguments(inner)
         converted = convert_body(body)
-        source = "function #{name}(#{params}) #{function_suffix(attrs)}{\n#{converted}\n}\n"
-        if emittable?(converted, source), do: source, else: ""
+
+        # Line-neutral: the signature stays on the `<cffunction>` line and `}` on
+        # the `</cffunction>` line, with the body's own newlines in between — so a
+        # converted function occupies the same source lines as the tag form, and
+        # statement line numbers map back to the original `.cfc`.
+        source = "function #{name}(#{params}) #{function_suffix(attrs)}{#{converted}}"
+        if emittable?(converted, source), do: source, else: blank_lines(whole)
     end
   end
 
@@ -181,7 +186,7 @@ defmodule ExML.CFScript.TagConverter do
     |> convert_cfquery()
     |> convert_cfsavecontent()
     |> convert_cfinvoke()
-    |> strip(@cfmail_re)
+    |> blank(@cfmail_re)
     |> strip(~r/<cfdump\b#{@tag_content}\s*\/?>/i)
     |> strip(~r/<cflog\b#{@tag_content}\s*\/?>/i)
     # Unwrap wrapper tags (run the body as-is).
@@ -219,14 +224,17 @@ defmodule ExML.CFScript.TagConverter do
 
   @spec convert_cfquery(String.t()) :: String.t()
   defp convert_cfquery(body) do
-    Regex.replace(@cfquery_re, body, fn _whole, attrs, sql ->
+    Regex.replace(@cfquery_re, body, fn whole, attrs, sql ->
       {converted_sql, params} = convert_queryparams(sql)
       call = "queryExecute(#{quoted(converted_sql)}, {#{params}})"
 
-      case attrs_map(attrs) |> Map.get("name") do
-        nil -> "#{call};\n"
-        name -> "#{name} = #{call};\n"
-      end
+      statement =
+        case attrs_map(attrs) |> Map.get("name") do
+          nil -> "#{call};"
+          name -> "#{name} = #{call};"
+        end
+
+      pad_to(statement, whole)
     end)
   end
 
@@ -274,11 +282,14 @@ defmodule ExML.CFScript.TagConverter do
 
   @spec convert_cfsavecontent(String.t()) :: String.t()
   defp convert_cfsavecontent(body) do
-    Regex.replace(@cfsavecontent_re, body, fn _whole, attrs, content ->
-      case attrs_map(attrs) |> Map.get("variable") do
-        nil -> ""
-        var -> "#{var} = #{quoted(content)};\n"
-      end
+    Regex.replace(@cfsavecontent_re, body, fn whole, attrs, content ->
+      statement =
+        case attrs_map(attrs) |> Map.get("variable") do
+          nil -> ""
+          var -> "#{var} = #{quoted(content)};"
+        end
+
+      pad_to(statement, whole)
     end)
   end
 
@@ -287,7 +298,9 @@ defmodule ExML.CFScript.TagConverter do
   @spec convert_cfinvoke(String.t()) :: String.t()
   defp convert_cfinvoke(body) do
     body
-    |> sub(@cfinvoke_re, fn _whole, attrs, inner -> build_invoke(attrs_map(attrs), inner) end)
+    |> sub(@cfinvoke_re, fn whole, attrs, inner ->
+      pad_to(build_invoke(attrs_map(attrs), inner), whole)
+    end)
     |> sub(@cfinvoke_self_re, fn _whole, attrs -> build_invoke(attrs_map(attrs), "") end)
   end
 
@@ -302,8 +315,8 @@ defmodule ExML.CFScript.TagConverter do
           "#{invoke_target(Map.get(attrs, "component"))}#{method}(#{invoke_args(attrs, inner)})"
 
         case Map.get(attrs, "returnvariable") do
-          nil -> "#{call};\n"
-          ret -> "#{ret} = #{call};\n"
+          nil -> "#{call};"
+          ret -> "#{ret} = #{call};"
         end
     end
   end
@@ -496,6 +509,25 @@ defmodule ExML.CFScript.TagConverter do
   @spec truthy_attr?(String.t() | nil) :: boolean()
   defp truthy_attr?(nil), do: false
   defp truthy_attr?(value), do: String.downcase(value) in ["true", "yes"]
+
+  # Replace a dropped block with just its newlines, so surrounding line numbers
+  # don't shift.
+  @spec blank_lines(String.t()) :: String.t()
+  defp blank_lines(text), do: String.duplicate("\n", nl_count(text))
+
+  @spec nl_count(String.t()) :: non_neg_integer()
+  defp nl_count(text), do: text |> :binary.matches("\n") |> length()
+
+  # Replace each match with only its newlines (line-preserving deletion).
+  @spec blank(String.t(), Regex.t()) :: String.t()
+  defp blank(source, regex), do: Regex.replace(regex, source, &blank_lines/1)
+
+  # Pad a single-statement replacement with trailing newlines so it spans the
+  # same number of lines as the multi-line block it replaces.
+  @spec pad_to(String.t(), String.t()) :: String.t()
+  defp pad_to(replacement, original) do
+    replacement <> String.duplicate("\n", max(nl_count(original) - nl_count(replacement), 0))
+  end
 
   @spec strip_hashes(String.t()) :: String.t()
   defp strip_hashes(value),

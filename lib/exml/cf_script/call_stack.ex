@@ -32,6 +32,15 @@ defmodule ExML.CFScript.CallStack do
     end
   end
 
+  @doc "Update the innermost frame's current line as execution advances."
+  @spec set_line(pos_integer() | nil) :: :ok
+  def set_line(line) do
+    case frames() do
+      [top | rest] -> put([%{top | line: line} | rest])
+      [] -> :ok
+    end
+  end
+
   @doc "The current frames, innermost first."
   @spec frames() :: [frame()]
   def frames, do: Process.get(@key, [])

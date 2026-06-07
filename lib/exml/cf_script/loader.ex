@@ -65,7 +65,7 @@ defmodule ExML.CFScript.Loader do
     {extends, tokens} =
       source
       |> preprocess()
-      |> Lexer.tokenize()
+      |> Lexer.tokenize_lines()
       |> strip_component_wrapper()
 
     {functions, static_init} = parse_members_leniently(tokens, label, [], [])
@@ -120,7 +120,8 @@ defmodule ExML.CFScript.Loader do
   @spec preprocess(String.t()) :: String.t()
   defp preprocess(source) do
     source
-    |> strip(~r/<!---.*?--->/s)
+    # Blank (don't delete) multi-line comments so line numbers don't shift.
+    |> blank(~r/<!---.*?--->/s)
     |> TagConverter.convert_cffunctions()
     |> strip(~r/<\/?cfcomponent\b[^>]*>/i)
     |> strip(~r/<\/?cfscript\s*>/i)
@@ -129,18 +130,26 @@ defmodule ExML.CFScript.Loader do
   @spec strip(String.t(), Regex.t()) :: String.t()
   defp strip(source, regex), do: Regex.replace(regex, source, "")
 
+  # Replace each match with just its newlines, preserving line numbers.
+  @spec blank(String.t(), Regex.t()) :: String.t()
+  defp blank(source, regex) do
+    Regex.replace(regex, source, fn match ->
+      match |> :binary.matches("\n") |> Enum.map_join(fn _ -> "\n" end)
+    end)
+  end
+
   ## Component wrapper / lenient function extraction
 
   # If the tokens open with `component [attrs] { ... }`, peel the wrapper and
   # capture the `extends` attribute; otherwise treat the tokens as a bare list
   # of member declarations.
   @spec strip_component_wrapper([Lexer.token()]) :: {String.t() | nil, [Lexer.token()]}
-  defp strip_component_wrapper([{:ident, kw} | rest]) do
+  defp strip_component_wrapper([{:ident, kw, _} = tok | rest]) do
     if String.downcase(kw) == "component" do
       {extends, after_attrs} = take_component_attrs(rest, nil)
       {extends, drop_outer_braces(after_attrs)}
     else
-      {nil, [{:ident, kw} | rest]}
+      {nil, [tok | rest]}
     end
   end
 
@@ -148,27 +157,27 @@ defmodule ExML.CFScript.Loader do
 
   @spec take_component_attrs([Lexer.token()], String.t() | nil) ::
           {String.t() | nil, [Lexer.token()]}
-  defp take_component_attrs([{:op, "{"} | _] = tokens, extends), do: {extends, tokens}
+  defp take_component_attrs([{:op, "{", _} | _] = tokens, extends), do: {extends, tokens}
 
-  defp take_component_attrs([{:ident, name}, {:op, "="}, {:string, val} | rest], extends) do
+  defp take_component_attrs([{:ident, name, _}, {:op, "=", _}, {:string, val, _} | rest], extends) do
     extends = if String.downcase(name) == "extends", do: val, else: extends
     take_component_attrs(rest, extends)
   end
 
-  defp take_component_attrs([{:ident, _n}, {:op, "="}, {_t, _v} | rest], extends),
+  defp take_component_attrs([{:ident, _n, _}, {:op, "=", _}, {_t, _v, _} | rest], extends),
     do: take_component_attrs(rest, extends)
 
   defp take_component_attrs(tokens, extends), do: {extends, tokens}
 
   # Drop the leading `{` and the matching trailing `}` of the component body.
   @spec drop_outer_braces([Lexer.token()]) :: [Lexer.token()]
-  defp drop_outer_braces([{:op, "{"} | rest]) do
+  defp drop_outer_braces([{:op, "{", _} | rest]) do
     rest |> Enum.reverse() |> drop_trailing_close_brace() |> Enum.reverse()
   end
 
   defp drop_outer_braces(tokens), do: tokens
 
-  defp drop_trailing_close_brace([{:op, "}"} | rest]), do: rest
+  defp drop_trailing_close_brace([{:op, "}", _} | rest]), do: rest
   defp drop_trailing_close_brace(tokens), do: tokens
 
   # Walk top-level tokens, carving each member into its own chunk: a function
@@ -234,7 +243,7 @@ defmodule ExML.CFScript.Loader do
   defp collect_member([], _leading), do: :done
 
   # `static {` — a static initializer block (leading is exactly `static`).
-  defp collect_member([{:op, "{"} | rest], leading) do
+  defp collect_member([{:op, "{", _} | rest], leading) do
     if static_only?(leading) do
       {inner, after_block} = take_braced_block(rest, [], 1)
       {:static_init, inner, after_block}
@@ -243,16 +252,16 @@ defmodule ExML.CFScript.Loader do
     end
   end
 
-  defp collect_member([{:ident, word} | rest], leading) do
+  defp collect_member([{:ident, word, _} = tok | rest], leading) do
     down = String.downcase(word)
 
     cond do
       down == "function" ->
         {body_tokens, after_body} = take_function_body(rest, [])
-        {:function, Enum.reverse(leading) ++ [{:ident, word}] ++ body_tokens, after_body}
+        {:function, Enum.reverse(leading) ++ [tok] ++ body_tokens, after_body}
 
       down in @modifier_words or down in @type_words ->
-        collect_member(rest, [{:ident, word} | leading])
+        collect_member(rest, [tok | leading])
 
       true ->
         # Unexpected top-level ident (e.g. a `property` statement); drop the
@@ -264,7 +273,7 @@ defmodule ExML.CFScript.Loader do
   defp collect_member([_other | rest], _leading), do: collect_member(rest, [])
 
   @spec static_only?([Lexer.token()]) :: boolean()
-  defp static_only?([{:ident, word}]), do: String.downcase(word) == "static"
+  defp static_only?([{:ident, word, _}]), do: String.downcase(word) == "static"
   defp static_only?(_leading), do: false
 
   # Collect tokens until the matching `}` (assuming the opening `{` was consumed).
@@ -272,12 +281,12 @@ defmodule ExML.CFScript.Loader do
           {[Lexer.token()], [Lexer.token()]}
   defp take_braced_block([], acc, _depth), do: {Enum.reverse(acc), []}
 
-  defp take_braced_block([{:op, "{"} = t | rest], acc, depth),
+  defp take_braced_block([{:op, "{", _} = t | rest], acc, depth),
     do: take_braced_block(rest, [t | acc], depth + 1)
 
-  defp take_braced_block([{:op, "}"} | rest], acc, 1), do: {Enum.reverse(acc), rest}
+  defp take_braced_block([{:op, "}", _} | rest], acc, 1), do: {Enum.reverse(acc), rest}
 
-  defp take_braced_block([{:op, "}"} = t | rest], acc, depth),
+  defp take_braced_block([{:op, "}", _} = t | rest], acc, depth),
     do: take_braced_block(rest, [t | acc], depth - 1)
 
   defp take_braced_block([t | rest], acc, depth), do: take_braced_block(rest, [t | acc], depth)
@@ -291,19 +300,19 @@ defmodule ExML.CFScript.Loader do
   # :pre — before the body's opening brace; :body — inside the body.
   defp take_function_body([], acc, _state, _depth), do: {Enum.reverse(acc), []}
 
-  defp take_function_body([{:op, "{"} = t | rest], acc, :pre, _depth) do
+  defp take_function_body([{:op, "{", _} = t | rest], acc, :pre, _depth) do
     take_function_body(rest, [t | acc], :body, 1)
   end
 
-  defp take_function_body([{:op, "{"} = t | rest], acc, :body, depth) do
+  defp take_function_body([{:op, "{", _} = t | rest], acc, :body, depth) do
     take_function_body(rest, [t | acc], :body, depth + 1)
   end
 
-  defp take_function_body([{:op, "}"} = t | rest], acc, :body, 1) do
+  defp take_function_body([{:op, "}", _} = t | rest], acc, :body, 1) do
     {Enum.reverse([t | acc]), rest}
   end
 
-  defp take_function_body([{:op, "}"} = t | rest], acc, :body, depth) do
+  defp take_function_body([{:op, "}", _} = t | rest], acc, :body, depth) do
     take_function_body(rest, [t | acc], :body, depth - 1)
   end
 

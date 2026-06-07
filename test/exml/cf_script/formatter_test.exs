@@ -41,8 +41,9 @@ defmodule ExML.CFScript.FormatterTest do
 
       assert Enum.map(result.stack, & &1.function) == ["inner", "boom", "run"]
       assert Enum.all?(result.stack, &(&1.source == "widget_spec.cfc"))
-      # declaration lines in the inline source (component { is line 1)
-      assert Enum.map(result.stack, & &1.line) == [2, 3, 4]
+      # statement-level lines: inner throws (2), boom calls inner (3), run reaches
+      # boom() inside the `it` body (7).
+      assert Enum.map(result.stack, & &1.line) == [2, 3, 7]
     end
 
     test "an assertion failure is a :fail with no backtrace" do
@@ -50,6 +51,21 @@ defmodule ExML.CFScript.FormatterTest do
       assert result.status == :fail
       assert result.type == "AssertionError"
       assert result.stack == []
+    end
+
+    test "statement line is accurate through tag conversion (the <cfthrow> line)" do
+      # tagthrow.cfc: <cfthrow> is on line 4 of the original tag-based source.
+      summary =
+        Runner.run_spec_source(
+          ~S|component { function run() { new cfc.tagthrow().boom(); } }|,
+          "inline.cfc",
+          cfc_root: @cfc_root
+        )
+
+      [%{stack: stack}] = summary.results
+      boom = Enum.find(stack, &(&1.function == "boom"))
+      assert boom.source == "cfc.tagthrow"
+      assert boom.line == 4
     end
   end
 
