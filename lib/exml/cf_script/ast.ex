@@ -9,9 +9,16 @@ defmodule ExML.CFScript.AST do
   """
 
   defmodule Component do
-    @moduledoc "A parsed CFC: an ordered list of member function declarations."
-    @type t :: %__MODULE__{functions: [ExML.CFScript.AST.Function.t()], extends: String.t() | nil}
-    defstruct functions: [], extends: nil
+    @moduledoc """
+    A parsed CFC: its member functions, optional `extends`, and the statements
+    from any `static { ... }` initializer block (run once into the static scope).
+    """
+    @type t :: %__MODULE__{
+            functions: [ExML.CFScript.AST.Function.t()],
+            extends: String.t() | nil,
+            static_init: [tuple()]
+          }
+    defstruct functions: [], extends: nil, static_init: []
   end
 
   defmodule Function do

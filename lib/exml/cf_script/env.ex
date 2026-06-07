@@ -8,6 +8,10 @@ defmodule ExML.CFScript.Env do
     * `variables` — the component instance's shared `variables` scope
     * `this`      — the current component instance (or `nil` for static calls)
     * `default_scope` — where unscoped assignments land (`:local` | `:variables`)
+    * `static_scope` — the component's shared `static` scope
+    * `component`  — the `AST.Component` currently executing (for sibling-method
+      resolution, including from static methods where `this` is nil)
+    * `type_path`  — the component's path (keys its static scope)
     * `ctx`       — `ExML.CFScript.Context`, shared across the whole run
   """
 
@@ -19,10 +23,23 @@ defmodule ExML.CFScript.Env do
           variables: Scope.t(),
           this: term(),
           default_scope: :local | :variables,
+          static_scope: Scope.t() | nil,
+          component: term(),
+          type_path: String.t() | nil,
           ctx: term()
         }
 
-  defstruct [:arguments, :local, :variables, :this, :default_scope, :ctx]
+  defstruct [
+    :arguments,
+    :local,
+    :variables,
+    :this,
+    :default_scope,
+    :static_scope,
+    :component,
+    :type_path,
+    :ctx
+  ]
 end
 
 defmodule ExML.CFScript.Context do

@@ -58,8 +58,8 @@ defmodule ExML.CFScript.Loader do
       |> Lexer.tokenize()
       |> strip_component_wrapper()
 
-    functions = parse_functions_leniently(tokens, label, [])
-    %AST.Component{functions: functions, extends: extends}
+    {functions, static_init} = parse_members_leniently(tokens, label, [], [])
+    %AST.Component{functions: functions, extends: extends, static_init: static_init}
   end
 
   ## File resolution
@@ -133,63 +133,116 @@ defmodule ExML.CFScript.Loader do
   defp drop_trailing_close_brace([{:op, "}"} | rest]), do: rest
   defp drop_trailing_close_brace(tokens), do: tokens
 
-  # Walk top-level tokens, carving each function into its own chunk and parsing
-  # it. Leading modifier idents accumulate until a `function` keyword; the chunk
-  # then runs through the brace-matched body.
-  @spec parse_functions_leniently([Lexer.token()], String.t(), [AST.Function.t()]) ::
-          [AST.Function.t()]
-  defp parse_functions_leniently(tokens, label, acc) do
-    case next_function_chunk(tokens) do
+  # Walk top-level tokens, carving each member into its own chunk: a function
+  # (parsed leniently — an unparseable one is skipped) or a `static { ... }`
+  # initializer block (whose statements accumulate into static_init).
+  @spec parse_members_leniently([Lexer.token()], String.t(), [AST.Function.t()], [tuple()]) ::
+          {[AST.Function.t()], [tuple()]}
+  defp parse_members_leniently(tokens, label, funcs, static_init) do
+    case next_member_chunk(tokens) do
       :done ->
-        Enum.reverse(acc)
+        {Enum.reverse(funcs), static_init}
 
-      {chunk, rest} ->
-        acc =
-          try do
-            [Parser.parse_one_function(chunk) | acc]
-          rescue
-            e ->
-              Logger.debug(
-                "ExML.CFScript.Loader: skipping unparseable function in #{label}: " <>
-                  Exception.message(e)
-              )
+      {:function, chunk, rest} ->
+        funcs = parse_one_function_lenient(chunk, label, funcs)
+        parse_members_leniently(rest, label, funcs, static_init)
 
-              acc
-          end
-
-        parse_functions_leniently(rest, label, acc)
+      {:static_init, inner, rest} ->
+        parse_members_leniently(
+          rest,
+          label,
+          funcs,
+          static_init ++ parse_static_init(inner, label)
+        )
     end
   end
 
-  # Find the next function: collect leading modifier idents, then on the
-  # `function` keyword, brace-match its body and return {chunk_tokens, rest}.
-  @spec next_function_chunk([Lexer.token()]) :: {[Lexer.token()], [Lexer.token()]} | :done
-  defp next_function_chunk(tokens), do: collect_until_function(tokens, [])
+  @spec parse_one_function_lenient([Lexer.token()], String.t(), [AST.Function.t()]) ::
+          [AST.Function.t()]
+  defp parse_one_function_lenient(chunk, label, funcs) do
+    [Parser.parse_one_function(chunk) | funcs]
+  rescue
+    e ->
+      Logger.debug(
+        "ExML.CFScript.Loader: skipping unparseable function in #{label}: #{Exception.message(e)}"
+      )
+
+      funcs
+  end
+
+  @spec parse_static_init([Lexer.token()], String.t()) :: [tuple()]
+  defp parse_static_init(inner, label) do
+    Parser.parse_statements_from_tokens(inner)
+  rescue
+    e ->
+      Logger.debug(
+        "ExML.CFScript.Loader: skipping unparseable static block in #{label}: #{Exception.message(e)}"
+      )
+
+      []
+  end
+
+  # Collect leading modifier idents until either a `function` keyword (a function
+  # member) or a `{` directly after `static` (a static initializer block).
+  @spec next_member_chunk([Lexer.token()]) ::
+          {:function, [Lexer.token()], [Lexer.token()]}
+          | {:static_init, [Lexer.token()], [Lexer.token()]}
+          | :done
+  defp next_member_chunk(tokens), do: collect_member(tokens, [])
 
   @modifier_words ~w(static public private package remote final abstract)
   @type_words ~w(any void string numeric boolean date datetime array struct query component binary guid uuid)
 
-  defp collect_until_function([], _leading), do: :done
+  defp collect_member([], _leading), do: :done
 
-  defp collect_until_function([{:ident, word} | rest], leading) do
+  # `static {` — a static initializer block (leading is exactly `static`).
+  defp collect_member([{:op, "{"} | rest], leading) do
+    if static_only?(leading) do
+      {inner, after_block} = take_braced_block(rest, [], 1)
+      {:static_init, inner, after_block}
+    else
+      collect_member(rest, [])
+    end
+  end
+
+  defp collect_member([{:ident, word} | rest], leading) do
     down = String.downcase(word)
 
     cond do
       down == "function" ->
         {body_tokens, after_body} = take_function_body(rest, [])
-        {Enum.reverse(leading) ++ [{:ident, word}] ++ body_tokens, after_body}
+        {:function, Enum.reverse(leading) ++ [{:ident, word}] ++ body_tokens, after_body}
 
       down in @modifier_words or down in @type_words ->
-        collect_until_function(rest, [{:ident, word} | leading])
+        collect_member(rest, [{:ident, word} | leading])
 
       true ->
         # Unexpected top-level ident (e.g. a `property` statement); drop the
         # accumulated leading tokens and skip this one token to resync.
-        collect_until_function(rest, [])
+        collect_member(rest, [])
     end
   end
 
-  defp collect_until_function([_other | rest], _leading), do: collect_until_function(rest, [])
+  defp collect_member([_other | rest], _leading), do: collect_member(rest, [])
+
+  @spec static_only?([Lexer.token()]) :: boolean()
+  defp static_only?([{:ident, word}]), do: String.downcase(word) == "static"
+  defp static_only?(_leading), do: false
+
+  # Collect tokens until the matching `}` (assuming the opening `{` was consumed).
+  @spec take_braced_block([Lexer.token()], [Lexer.token()], non_neg_integer()) ::
+          {[Lexer.token()], [Lexer.token()]}
+  defp take_braced_block([], acc, _depth), do: {Enum.reverse(acc), []}
+
+  defp take_braced_block([{:op, "{"} = t | rest], acc, depth),
+    do: take_braced_block(rest, [t | acc], depth + 1)
+
+  defp take_braced_block([{:op, "}"} | rest], acc, 1), do: {Enum.reverse(acc), rest}
+
+  defp take_braced_block([{:op, "}"} = t | rest], acc, depth),
+    do: take_braced_block(rest, [t | acc], depth - 1)
+
+  defp take_braced_block([t | rest], acc, depth), do: take_braced_block(rest, [t | acc], depth)
 
   # Capture tokens from just after `function` through the matching `}` of the
   # body. Tracks brace depth, ignoring everything until the first `{`.

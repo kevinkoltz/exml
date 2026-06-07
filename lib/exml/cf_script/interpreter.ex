@@ -35,7 +35,7 @@ defmodule ExML.CFScript.Interpreter do
     StructRef
   }
 
-  @scopes ~w(arguments local variables this)
+  @scopes ~w(arguments local variables this static)
 
   ## Public entry points
 
@@ -57,7 +57,7 @@ defmodule ExML.CFScript.Interpreter do
   @spec call_instance_method(Instance.t(), String.t(), [any()], Context.t()) :: any()
   def call_instance_method(%Instance{component: component} = instance, name, args, ctx) do
     func = function_named!(component, name, instance.type_path)
-    call_function(func, args, instance, instance.type_path, ctx)
+    call_function(func, args, instance, instance.type_path, component, ctx)
   end
 
   @doc "Invoke a closure or native function value with already-evaluated arguments."
@@ -71,6 +71,9 @@ defmodule ExML.CFScript.Interpreter do
       variables: cenv.variables,
       this: cenv.this,
       default_scope: :local,
+      static_scope: cenv.static_scope,
+      component: cenv.component,
+      type_path: cenv.type_path,
       ctx: cenv.ctx
     }
 
@@ -323,7 +326,7 @@ defmodule ExML.CFScript.Interpreter do
   defp eval_call({:static_member, obj_ast, name}, args, env) do
     %ComponentType{component: component, path: path} = resolve_component_type(obj_ast, env)
     func = function_named!(component, name, path)
-    call_function(func, eval_args(args, env), nil, path, env.ctx)
+    call_function(func, eval_args(args, env), nil, path, component, env.ctx)
   end
 
   # Member call: obj.method(args) — instance method or string member function.
@@ -362,8 +365,8 @@ defmodule ExML.CFScript.Interpreter do
       (callable = callable_var(name, env)) != :none ->
         invoke(callable, args, env)
 
-      match?(%Instance{}, env.this) and function_named(env.this.component, name) ->
-        call_instance_method(env.this, name, args, env.ctx)
+      sibling_function(env, name) != nil ->
+        call_sibling(sibling_function(env, name), name, args, env)
 
       Map.has_key?(env.ctx.natives, String.downcase(name)) ->
         invoke(Map.fetch!(env.ctx.natives, String.downcase(name)), args, env)
@@ -378,6 +381,22 @@ defmodule ExML.CFScript.Interpreter do
         raise CFException, message: "Undefined function: #{name}"
     end
   end
+
+  # A function defined on the currently-executing component (sibling method).
+  @spec sibling_function(Env.t(), String.t()) :: AST.Function.t() | nil
+  defp sibling_function(%Env{component: %AST.Component{} = component}, name),
+    do: function_named(component, name)
+
+  defp sibling_function(_env, _name), do: nil
+
+  # Call a sibling method: as an instance method when in instance context,
+  # otherwise as a static call (preserving the component's static scope).
+  @spec call_sibling(AST.Function.t(), String.t(), [any()], Env.t()) :: any()
+  defp call_sibling(_func, name, args, %Env{this: %Instance{} = instance} = env),
+    do: call_instance_method(instance, name, args, env.ctx)
+
+  defp call_sibling(func, _name, args, env),
+    do: call_function(func, args, nil, env.type_path, env.component, env.ctx)
 
   # queryExecute(sql [, params [, options]]). The actual SQL runs through the
   # pluggable Context.query_executor (e.g. Macola.Repo when wired into the
@@ -432,9 +451,15 @@ defmodule ExML.CFScript.Interpreter do
 
   ## Function invocation (instance + static, AST-defined)
 
-  @spec call_function(AST.Function.t(), [any()], Instance.t() | nil, String.t(), Context.t()) ::
-          any()
-  defp call_function(%AST.Function{} = func, args, instance, _type_path, ctx) do
+  @spec call_function(
+          AST.Function.t(),
+          [any()],
+          Instance.t() | nil,
+          String.t(),
+          AST.Component.t(),
+          Context.t()
+        ) :: any()
+  defp call_function(%AST.Function{} = func, args, instance, type_path, component, ctx) do
     variables = if instance, do: instance.variables, else: Scope.new()
     arguments = Scope.new()
 
@@ -444,11 +469,54 @@ defmodule ExML.CFScript.Interpreter do
       variables: variables,
       this: instance,
       default_scope: if(func.localmode, do: :local, else: :variables),
+      static_scope: ensure_static_scope(type_path, component, ctx),
+      component: component,
+      type_path: type_path,
       ctx: ctx
     }
 
     bind_params(func.params, args, arguments, base_env)
     run_body(func.body, base_env)
+  end
+
+  # The component's shared `static` scope, created and populated (by running the
+  # `static { ... }` initializer once) on first use. Keyed by type_path so all
+  # instances/static calls of a component share one static scope per run.
+  @spec ensure_static_scope(String.t(), AST.Component.t(), Context.t()) :: Scope.t()
+  defp ensure_static_scope(type_path, component, ctx) do
+    key = {__MODULE__, :static, type_path}
+
+    case Process.get(key) do
+      nil ->
+        scope = Scope.new()
+        Process.put(key, scope)
+        run_static_init(component, scope, type_path, ctx)
+        scope
+
+      scope ->
+        scope
+    end
+  end
+
+  @spec run_static_init(AST.Component.t(), Scope.t(), String.t(), Context.t()) :: :ok
+  defp run_static_init(%AST.Component{static_init: []}, _scope, _type_path, _ctx), do: :ok
+
+  defp run_static_init(%AST.Component{static_init: stmts} = component, scope, type_path, ctx) do
+    # During init, unscoped assignments and `static.x` both target the static
+    # scope (variables is aliased to it).
+    env = %Env{
+      arguments: Scope.new(),
+      local: Scope.new(),
+      variables: scope,
+      this: nil,
+      default_scope: :variables,
+      static_scope: scope,
+      component: component,
+      type_path: type_path,
+      ctx: ctx
+    }
+
+    Enum.each(stmts, &eval_stmt(&1, env))
   end
 
   # Bind positional args to params (with defaults / required checks) into `scope`.
@@ -607,6 +675,7 @@ defmodule ExML.CFScript.Interpreter do
   defp scope_ref("arguments", env), do: env.arguments
   defp scope_ref("local", env), do: env.local
   defp scope_ref("variables", env), do: env.variables
+  defp scope_ref("static", env), do: env.static_scope
 
   @spec resolve_var(String.t(), Env.t()) :: any()
   defp resolve_var(name, env) do
