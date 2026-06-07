@@ -378,6 +378,14 @@ defmodule ExML.CFScript.Interpreter do
     value
   end
 
+  # `cfc.x = v` memoizes onto a `cfc` struct in the variables scope (the CFML
+  # caching idiom); the path namespace stays usable via `new`/`::`.
+  defp assign({:member, {:var, "cfc"}, name}, value, env) do
+    ref = cfc_cache_ref(env)
+    Heap.write(ref, Struct.put(Heap.deref(ref), name, value))
+    value
+  end
+
   defp assign({:member, {:var, scope_kw}, name}, value, env) when scope_kw in @all_scopes do
     Scope.put(scope_ref(scope_kw, env), name, value)
     value
@@ -468,6 +476,16 @@ defmodule ExML.CFScript.Interpreter do
   # Scope-qualified read: arguments.x / local.x / variables.x / this.x
   defp eval({:member, {:var, scope_kw}, name}, env) when scope_kw in @all_scopes do
     read_scope_member(scope_kw, name, env)
+  end
+
+  # `cfc.x` member access: a component instance memoized on the `cfc` scope (a
+  # common CFML caching idiom) if one was assigned there, otherwise the
+  # component-path namespace. (`new cfc.X()` / `cfc.X::m` use the path directly.)
+  defp eval({:member, {:var, "cfc"}, name}, env) do
+    case cfc_cache_fetch(env, name) do
+      {:ok, value} -> value
+      :error -> eval_member(%Namespace{base: "cfc"}, name, env)
+    end
   end
 
   defp eval({:member, obj_ast, name}, env), do: eval_member(eval(obj_ast, env), name, env)
@@ -1017,6 +1035,29 @@ defmodule ExML.CFScript.Interpreter do
     case Map.fetch(env.ctx.scopes, name) do
       {:ok, scope} -> scope
       :error -> raise CFException, message: "Scope '#{name}' is not available"
+    end
+  end
+
+  # Fetch `name` from the `cfc` cache struct (variables scope), if present.
+  @spec cfc_cache_fetch(Env.t(), String.t()) :: {:ok, any()} | :error
+  defp cfc_cache_fetch(env, name) do
+    case Scope.fetch(env.variables, "cfc") do
+      {:ok, %StructRef{} = ref} -> Struct.fetch(Heap.deref(ref), name)
+      _ -> :error
+    end
+  end
+
+  # The `cfc` cache struct in the variables scope, creating it on first write.
+  @spec cfc_cache_ref(Env.t()) :: StructRef.t()
+  defp cfc_cache_ref(env) do
+    case Scope.fetch(env.variables, "cfc") do
+      {:ok, %StructRef{} = ref} ->
+        ref
+
+      _ ->
+        ref = Heap.new_struct(%{})
+        Scope.put(env.variables, "cfc", ref)
+        ref
     end
   end
 

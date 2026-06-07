@@ -146,6 +146,21 @@ defmodule ExML.CFScript.LoaderTest do
              )
   end
 
+  test "cfc.x = ... memoizes an instance (cache) while new/:: still use the path" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 c = new cfc.cachetest();
+                 it("cfc cache and cfc path coexist", function() {
+                   assert_equal(c.helper_label(), "thing");
+                   assert_equal(c.via_new(), "thing");
+                 });
+               });
+               """)
+             )
+  end
+
   test "top-level <cfobject> creates the instance during the pseudo-constructor" do
     assert 1 ==
              passing(

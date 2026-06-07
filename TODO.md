@@ -42,10 +42,10 @@ actually *implement* these rather than mark them:
   `exml.unsupported` markers, so the function loads and only the IO line raises.
   Genuinely *running* these (filesystem/network/custom-tag templates) is out of
   scope for the interpreter.
-- [ ] **`cfc.x = createObject(...)` namespace-cache pattern** — assigning onto
-  the `cfc` path namespace (a memoization idiom, e.g. in `wo_events`) fails with
-  "Cannot assign member on [namespace]". `cfc` is the component-path resolver,
-  not a writable scope. Blocks `wo_events.event_handler` (route_events spec).
+- [x] **`cfc.x = createObject(...)` namespace-cache pattern** — `cfc.x` member
+  access/assignment now uses a `cfc` cache struct in the variables scope (the
+  CFML memoization idiom), while `new cfc.X()` / `cfc.X::m` still use the path,
+  matching how CFML disambiguates member access from path syntax.
 - [ ] **Stricter attribute-implementation flagging** — the per-tag allowed sets
   currently tolerate standard-but-unimplemented attributes (e.g. `<cfquery
   result=>`, `maxrows=`). Tighten to the genuinely-handled set once those are
