@@ -33,6 +33,11 @@ defmodule ExML.CFScript.Parser do
 
   @access_modifiers ~w(public private package remote)
 
+  # Type keywords that may precede a parameter name (`numeric x`); anything else
+  # leading a parameter is the name itself.
+  @param_types ~w(any void string numeric boolean date datetime time
+                  array struct query component binary guid uuid xml function)
+
   @doc "Parse a full cfscript component source string into an `AST.Component`."
   @spec parse_component(binary()) :: AST.Component.t()
   def parse_component(source) when is_binary(source) do
@@ -196,46 +201,49 @@ defmodule ExML.CFScript.Parser do
     end
   end
 
-  # `[required] [type] name [= default]`
+  # `[required] [type] name [= default] [annotation ...]`, where an annotation is
+  # a `key="value"` pair (`hint`, `displayname`, custom metadata, ...) that CFML
+  # allows after the name; we parse and ignore them so the function still loads.
   @spec parse_param([Lexer.token()]) :: {AST.Param.t(), [Lexer.token()]}
   defp parse_param(tokens) do
-    {required, tokens} =
-      case tokens do
-        [{:ident, w, _} | rest] -> if kw?(w, "required"), do: {true, rest}, else: {false, tokens}
-        _ -> {false, tokens}
-      end
-
-    {idents, tokens} = take_leading_idents(tokens, [])
-
-    {type, name} =
-      case idents do
-        [name] -> {nil, name}
-        [type, name] -> {type, name}
-        _ -> raise "ExML.CFScript.Parser: malformed parameter near #{inspect(tokens)}"
-      end
-
-    {default, tokens} =
-      case tokens do
-        [{:op, "=", _} | rest] ->
-          {expr, rest} = parse_expr(rest)
-          {expr, rest}
-
-        _ ->
-          {nil, tokens}
-      end
-
+    {required, tokens} = take_required(tokens)
+    {type, tokens} = take_optional_type(tokens)
+    {name, tokens} = take_ident(tokens)
+    {default, tokens} = take_param_default(tokens)
+    tokens = skip_param_annotations(tokens)
     {%AST.Param{name: name, type: type, required: required, default: default}, tokens}
   end
 
-  # Collect consecutive identifiers (param type + name) stopping at `,`/`)`/`=`.
-  @spec take_leading_idents([Lexer.token()], [String.t()]) :: {[String.t()], [Lexer.token()]}
-  defp take_leading_idents([{:ident, w, _}, {:op, op, _} | _] = tokens, acc)
-       when op in ["=", ",", ")"] do
-    {Enum.reverse([w | acc]), tl(tokens)}
+  @spec take_required([Lexer.token()]) :: {boolean(), [Lexer.token()]}
+  defp take_required([{:ident, w, _} | rest] = tokens),
+    do: if(kw?(w, "required"), do: {true, rest}, else: {false, tokens})
+
+  defp take_required(tokens), do: {false, tokens}
+
+  # A leading type keyword, but only when another ident (the name) follows — so a
+  # parameter literally named `string` is still treated as a name.
+  @spec take_optional_type([Lexer.token()]) :: {String.t() | nil, [Lexer.token()]}
+  defp take_optional_type([{:ident, w, _}, {:ident, _, _} | _] = tokens) do
+    if String.downcase(w) in @param_types,
+      do: {String.downcase(w), tl(tokens)},
+      else: {nil, tokens}
   end
 
-  defp take_leading_idents([{:ident, w, _} | rest], acc), do: take_leading_idents(rest, [w | acc])
-  defp take_leading_idents(tokens, acc), do: {Enum.reverse(acc), tokens}
+  defp take_optional_type(tokens), do: {nil, tokens}
+
+  @spec take_param_default([Lexer.token()]) :: {tuple() | nil, [Lexer.token()]}
+  defp take_param_default([{:op, "=", _} | rest]), do: parse_expr(rest)
+  defp take_param_default(tokens), do: {nil, tokens}
+
+  # Skip CFML parameter annotations (`hint="..."`, `displayname="..."`, ...) up to
+  # the next `,`/`)`. The value is parsed (to consume it) and discarded.
+  @spec skip_param_annotations([Lexer.token()]) :: [Lexer.token()]
+  defp skip_param_annotations([{:ident, _key, _}, {:op, "=", _} | rest]) do
+    {_value, rest} = parse_expr(rest)
+    skip_param_annotations(rest)
+  end
+
+  defp skip_param_annotations(tokens), do: tokens
 
   ## Statements
 

@@ -9,9 +9,9 @@ by area and roughly ordered by impact within each group.
   `{:unsupported, reason}` marker (raises a loud, line-tagged `exml.unsupported`
   error if reached); the rest of the function still loads and runs.
 - [x] **`do { } while ()`** loop.
-- [ ] **Inline param annotations** — `function f(numeric x hint="...")`. Today a
-  trailing `hint=` on a parameter fails to parse (`expected ')'`), dropping the
-  function.
+- [x] **Inline param annotations** — `function f(numeric x hint="...")`. Trailing
+  `key="value"` annotations after a parameter are parsed and ignored, so the
+  function loads (type vs name is disambiguated by a type-keyword set).
 - [ ] **`<!--` / HTML comments inside cfscript bodies** — currently lexes as
   `< ! --` and drops the function.
 

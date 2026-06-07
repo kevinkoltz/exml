@@ -80,6 +80,30 @@ defmodule ExML.CFScript.ParserTest do
       assert %AST.Function{name: "is_blank", static: true, return_type: "boolean"} = func
     end
 
+    test "parses params with type, default, and ignored annotations (hint=)" do
+      src = ~s"""
+      component {
+        function f(required numeric build_count hint="Total builds", string s = "x" displayname="S") {
+          return arguments.build_count;
+        }
+      }
+      """
+
+      assert %AST.Component{functions: [func]} = Parser.parse_component(src)
+
+      assert %AST.Function{
+               params: [
+                 %AST.Param{name: "build_count", type: "numeric", required: true, default: nil},
+                 %AST.Param{name: "s", type: "string", required: false}
+               ]
+             } = func
+    end
+
+    test "a parameter literally named like a type keyword stays a name" do
+      assert %AST.Component{functions: [%AST.Function{params: [%AST.Param{name: "string"}]}]} =
+               Parser.parse_component("component { function f(string) { return 1; } }")
+    end
+
     test "parses anonymous function arguments (describe/it)" do
       src = ~s"""
       component {
