@@ -127,7 +127,7 @@ defmodule ExML.CFScript.Collections do
   @doc """
   Recursively resolve references to plain Elixir values (lists/maps/scalars).
 
-  Used at the `queryExecute` boundary so a host executor (e.g. a Macola.Repo
+  Used at the `queryExecute` boundary so a host executor (e.g. an Ecto repo
   adapter) receives ordinary data — including nested `{value:, sqltype:}` param
   descriptors — rather than heap references.
   """

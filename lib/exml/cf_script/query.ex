@@ -107,7 +107,7 @@ defmodule ExML.CFScript.Query do
   @spec to_array(t()) :: [map()]
   def to_array(%__MODULE__{rows: rows}), do: rows
 
-  @doc "Build a query from an executor result shaped like `Macola.Repo.query/2`."
+  @doc "Build a query from an executor result shaped like `Ecto.Repo.query/2`."
   @spec from_result(%{columns: [String.t()], rows: [[any()]]}) :: t()
   def from_result(%{columns: columns, rows: rows}) do
     keys = Enum.map(columns, &down/1)

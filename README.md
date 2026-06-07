@@ -6,11 +6,10 @@ two parts:
 * **Tag transpiler** (`ExML.Tokenizer` / `ExML.Transpiler`) — compiles CFML tag
   markup (`<cfif>`, `<cfloop>`, `#interpolation#`) into EEx.
 * **cfscript interpreter** (`ExML.CFScript.*`) — a tree-walking interpreter for
-  cfscript. Its purpose is to run [Signal](https://gitlab.com/ahd-hydra/software/signal)'s
-  CFML test specs from Elixir (e.g. from a Phoenix project) without a running
-  Lucee/ColdFusion server.
+  cfscript. Its purpose is to run a CFML codebase's test specs from Elixir
+  (e.g. from a Phoenix project) without a running Lucee/ColdFusion server.
 
-## Running Signal specs
+## Running CFML specs
 
 The interpreter loads real `.cfc` components from a `--cfc-root` and runs a spec
 file. The spec's `describe`/`it`/`assert_*` calls are served by native Elixir
@@ -18,13 +17,13 @@ functions (`ExML.CFScript.Runner`) instead of the HTML-emitting
 `test_framework.cfc`, so results come back as plain data.
 
 ```sh
-mix exml.signal.test common_spec \
-  --cfc-root ../signal/cfc \
-  --spec-root ../signal/test/specs
+mix exml.test common_spec \
+  --cfc-root path/to/cfc \
+  --spec-root path/to/specs
 ```
 
 ```elixir
-ExML.CFScript.run_spec("../signal/test/specs/common_spec.cfc", cfc_root: "../signal/cfc")
+ExML.CFScript.run_spec("path/to/specs/common_spec.cfc", cfc_root: "path/to/cfc")
 #=> %{passed: 3, failed: 0, total: 3, results: [...]}
 ```
 
@@ -50,7 +49,7 @@ strings/arrays/structs (`s.trim()`, `a.map(fn)`, `s.keyExists(k)`).
 
 BIFs are organized into families behind the `ExML.CFScript.BIF` behaviour,
 aggregated by `ExML.CFScript.BIF.Registry`. They are ported 1:1 from the
-Lucee 6.2.5 sources and scoped to what the Signal repo actually uses:
+Lucee 6.2.5 sources and scoped to what a real CFML codebase uses:
 
 * **String** — `len`, `ucase`, `lcase`, `ucfirst`, `left`, `right`, `mid`,
   `trim`, `ltrim`, `rtrim`, `find`, `findNoCase`, `reFind`, `reverse`,
@@ -96,17 +95,17 @@ stay pure.
 Queries are a reference type (`queryNew`/`queryAddRow`/`querySetCell` mutate in
 place). `queryExecute(sql, params, options)` runs SQL through a **pluggable
 executor** — a `Context.query_executor` / `:query_executor` Runner option shaped
-like `Macola.Repo.query/2` (`(sql, params) -> %{columns: [...], rows: [[...]]}`).
-The standalone library has no database, so without an executor it raises; the
-Phoenix app injects a `Macola.Repo`-backed one (data_01/data_555). `options`
-supports `returnType` `"query"` (default) and `"array"` (array of row structs).
+like `Ecto.Repo.query/2` (`(sql, params) -> %{columns: [...], rows: [[...]]}`).
+The standalone library has no database, so without an executor it raises; a host
+application injects a repo-backed one. `options` supports `returnType` `"query"`
+(default) and `"array"` (array of row structs).
 
 ### Null support
 
 `isNull`/missing-key behavior follows Lucee's full-null-support setting via a
 `Context.null_support` flag (and `:null_support` Runner option). It defaults to
-**off**, matching Signal: reading a missing struct/scope key raises rather than
-yielding null.
+**off** (a common Lucee configuration): reading a missing struct/scope key
+raises rather than yielding null.
 
 ## Goals / roadmap
 

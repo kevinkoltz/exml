@@ -1,10 +1,10 @@
-defmodule Mix.Tasks.Exml.Signal.Test do
-  @shortdoc "Run Signal CFML test specs through the ExML cfscript interpreter"
+defmodule Mix.Tasks.Exml.Test do
+  @shortdoc "Run CFML test specs through the ExML cfscript interpreter"
 
   @moduledoc """
-  Run one or more Signal CFML test specs through the ExML cfscript interpreter.
+  Run one or more CFML test specs through the ExML cfscript interpreter.
 
-      mix exml.signal.test SPEC... --cfc-root PATH [--spec-root PATH]
+      mix exml.test SPEC... --cfc-root PATH [--spec-root PATH]
 
   ## Arguments
 
@@ -18,11 +18,11 @@ defmodule Mix.Tasks.Exml.Signal.Test do
 
   ## Examples
 
-      mix exml.signal.test common_spec \\
-        --cfc-root ../signal/cfc \\
-        --spec-root ../signal/test/specs
+      mix exml.test common_spec \\
+        --cfc-root path/to/cfc \\
+        --spec-root path/to/specs
 
-      mix exml.signal.test ../signal/test/specs/common_spec.cfc --cfc-root ../signal/cfc
+      mix exml.test path/to/specs/common_spec.cfc --cfc-root path/to/cfc
   """
 
   use Mix.Task

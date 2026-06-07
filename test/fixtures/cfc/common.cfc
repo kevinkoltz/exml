@@ -1,6 +1,6 @@
 <cfcomponent displayname="Common CFC" output="false">
 
-<!--- This mirrors the hybrid tag/script shell of signal/cfc/common.cfc. --->
+<!--- A hybrid tag/script CFC shell (cfcomponent + cfscript + cffunction). --->
 
 <cfscript>
 

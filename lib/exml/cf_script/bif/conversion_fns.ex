@@ -2,7 +2,7 @@ defmodule ExML.CFScript.BIF.ConversionFns do
   @moduledoc """
   CFML value-conversion built-in functions (`javaCast`, ...).
 
-  `javaCast` is mainly used in Signal to produce a null (`javaCast("null", "")`)
+  `javaCast` is mainly used to produce a null (`javaCast("null", "")`)
   and to coerce simple types for Java interop; the type cases we see are
   handled, others pass the value through.
   """

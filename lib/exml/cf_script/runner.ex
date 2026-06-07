@@ -1,6 +1,6 @@
 defmodule ExML.CFScript.Runner do
   @moduledoc """
-  Runs a Signal CFML test spec through the cfscript interpreter.
+  Runs a CFML test spec through the cfscript interpreter.
 
   The spec's `describe`/`it`/`xit`/`assert_*` calls resolve to native Elixir
   functions (registered here) rather than the HTML-emitting
@@ -26,7 +26,7 @@ defmodule ExML.CFScript.Runner do
   Options:
     * `:cfc_root` (required) — directory the `cfc.*` mapping resolves against.
     * `:null_support` (default `false`) — Lucee full-null-support mode. Off (the
-      Signal default) makes missing-key access raise; on yields null.
+      common default) makes missing-key access raise; on yields null.
   """
   @spec run_spec_file(String.t(), keyword()) :: summary()
   def run_spec_file(spec_path, opts) do

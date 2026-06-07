@@ -1,6 +1,6 @@
 defmodule ExML.CFScript.NullSupportTest do
   @moduledoc """
-  Lucee's "full null support" setting changes how missing keys behave. Signal
+  Lucee's "full null support" setting changes how missing keys behave. The codebase under test
   runs with it OFF (the default here): reading a missing struct key throws.
   Turning it on yields null instead.
   """

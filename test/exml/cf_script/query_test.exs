@@ -1,7 +1,7 @@
 defmodule ExML.CFScript.QueryTest do
   @moduledoc """
   Query object semantics (in-memory builders) and queryExecute against a
-  pluggable executor shaped like `Macola.Repo.query/2`.
+  pluggable executor shaped like `Ecto.Repo.query/2`.
   """
   use ExUnit.Case, async: true
 
@@ -82,7 +82,7 @@ defmodule ExML.CFScript.QueryTest do
              )
   end
 
-  test "queryExecute returns a query from the executor (Macola.Repo-shaped result)" do
+  test "queryExecute returns a query from the executor (repo-shaped result)" do
     executor = fn _sql, _params ->
       %{columns: ["id", "name"], rows: [[1, "kevin"], [2, "jane"]]}
     end
@@ -105,12 +105,11 @@ defmodule ExML.CFScript.QueryTest do
   end
 
   test "queryExecute with a TOP 1 single-row result" do
-    # Mirrors the common `SELECT TOP 1 ... WHERE x = :id` Signal pattern; the
-    # executor would be Macola.Repo in the app.
-    # The executor returns plain Elixir values (the host adapter normalizes
-    # Tds Decimal/date types before handing rows to the interpreter).
+    # The common `SELECT TOP 1 ... WHERE x = :id` shape with a named param.
+    # The executor returns plain Elixir values (a host adapter normalizes
+    # database Decimal/date types before handing rows to the interpreter).
     executor = fn _sql, _params ->
-      %{columns: ["balance"], rows: [["12.50"]]}
+      %{columns: ["total"], rows: [["12.50"]]}
     end
 
     assert 1 ==
@@ -120,11 +119,11 @@ defmodule ExML.CFScript.QueryTest do
                  describe("q", function() {
                    it("top 1", function() {
                      row = queryExecute(
-                       "SELECT TOP 1 balance FROM ARCUSFIL_SQL WHERE cus_no = :cus",
-                       { cus: { value: "ABC", sqltype: "char" } }
+                       "SELECT TOP 1 total FROM accounts WHERE id = :id",
+                       { id: { value: "ABC", sqltype: "char" } }
                      );
                      assert_equal(row.recordCount, 1);
-                     assert_equal(row.balance[1], "12.50");
+                     assert_equal(row.total[1], "12.50");
                    });
                  });
                  """,

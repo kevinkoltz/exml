@@ -5,7 +5,7 @@ defmodule ExML.CFScript.Loader do
 
   ## Tag/script unwrapping
 
-  Signal CFCs come in several shells: pure `component {}`, `<cfscript>`-wrapped
+  CFCs come in several shells: pure `component {}`, `<cfscript>`-wrapped
   script, and tag components (`<cfcomponent>` with embedded `<cfscript>` blocks
   and `<cffunction>` tags). The loader strips the tag shell (`<!--- --->`
   comments, `<cffunction>...</cffunction>` blocks, and the

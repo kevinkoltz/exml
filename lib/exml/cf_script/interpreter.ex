@@ -409,7 +409,7 @@ defmodule ExML.CFScript.Interpreter do
     do: call_function(func, args, nil, env.type_path, env.component, env.ctx)
 
   # queryExecute(sql [, params [, options]]). The actual SQL runs through the
-  # pluggable Context.query_executor (e.g. Macola.Repo when wired into the
+  # pluggable Context.query_executor (e.g. an Ecto repo, when wired into a host
   # Phoenix app); without one configured it raises. options.returnType selects
   # "query" (default, a QueryRef) or "array" (an array of row structs).
   @spec exec_query([any()], Env.t()) :: any()
@@ -434,7 +434,7 @@ defmodule ExML.CFScript.Interpreter do
   defp no_executor do
     raise CFException,
       message:
-        "queryExecute requires a configured query executor; run from the Phoenix app (Macola.Repo) or pass :query_executor"
+        "queryExecute requires a configured query executor; run from a host app with a repo or pass :query_executor"
   end
 
   @spec normalize_return_type(any()) :: String.t()
@@ -628,7 +628,7 @@ defmodule ExML.CFScript.Interpreter do
     end
   end
 
-  # Honor Lucee's full-null-support setting: with it off (Signal's default),
+  # Honor Lucee's full-null-support setting: with it off (the common default),
   # reading a missing key raises; with it on, it yields null.
   @spec missing_key(String.t(), Env.t()) :: nil
   defp missing_key(_name, %Env{ctx: %{null_support: true}}), do: nil
