@@ -490,6 +490,17 @@ defmodule ExML.CFScript.Interpreter do
 
   defp eval({:member, obj_ast, name}, env), do: eval_member(eval(obj_ast, env), name, env)
 
+  # `cfc.X::CONSTANT` used as a value — read a static var from X's static scope.
+  defp eval({:static_member, obj_ast, name}, env) do
+    %ComponentType{component: component, path: path} = resolve_component_type(obj_ast, env)
+    static_scope = ensure_static_scope(path, component, env.ctx)
+
+    case Scope.fetch(static_scope, name) do
+      {:ok, value} -> value
+      :error -> raise CFException, message: "Component '#{path}' has no static member '#{name}'"
+    end
+  end
+
   defp eval({:var, name}, env), do: resolve_var(name, env)
 
   defp eval({:index, obj_ast, key_ast}, env) do

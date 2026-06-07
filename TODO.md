@@ -66,7 +66,10 @@ actually *implement* these rather than mark them:
   cgi/server/url/form are seeded).
 - [ ] **Timezone-aware `dateConvert`** — dates are timezone-naive today.
 - [ ] **Wider BIF coverage** — add string/date/list/struct/math BIFs as specs
-  require them.
+  require them. The sweep surfaced missing: `writeOutput`, `URLEncodedFormat`,
+  `structDebug`/`structGet`, and a few others.
+- [x] **Parameter `:` default + static-member reads** — `boolean flag: false`
+  (Lucee's colon default) parses; `cfc.X::CONSTANT` reads a static value.
 
 ## Integration (hapi side)
 
@@ -81,6 +84,17 @@ actually *implement* these rather than mark them:
 - [ ] **`promise_date_granularity_blank_spec`** — needs a live `request.mbx_db_name`
   DB scope, so it runs via the hapi `SpecRunner` against Macola (use a stub or a
   small fixture to keep DB load low).
-- [ ] **Broaden the spec sweep** — run the remaining `test/specs/*_spec.cfc`
-  through the runner, fixing parser/BIF gaps as they surface (skip DB-heavy
-  specs or stub their queries).
+- [x] **Broad sweep (48 specs, `:stub` DB)** — 14 fully green; no hangs. The big
+  unblock was `repo.cfc` not parsing (Lucee `: ` defaults + `{}` param defaults
+  fooling the chunker), which made every `cfc.repo::execute` caller error. The
+  rest of the 0/N specs are **DB-data-dependent**: with `:stub` their queries
+  return empty so assertions fail — they need real Macola (run via the hapi
+  `SpecRunner`) to validate.
+- [ ] **Run DB-dependent specs against real Macola** (via `mix hapi.signal.test`)
+  to find any genuinely broken in Lucee. Keep DB load low (small set at a time).
+- [ ] **Fix the genuinely-broken spec** `builder/builder_ui_scenarios_spec.cfc`
+  — `xit("E1: deep-link #/order/...")` has an unescaped `#` in a string, which
+  Lucee also rejects (needs `##`). exml's load error matches Lucee here; the spec
+  itself needs the `#` escaped.
+- [ ] **`work_order_gating_decision_spec`** (1/25) — `COMPLETE_STATUS` undefined
+  (likely a static/constant or unrun setup); investigate once DB specs run.

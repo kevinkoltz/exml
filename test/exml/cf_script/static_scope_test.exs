@@ -71,4 +71,18 @@ defmodule ExML.CFScript.StaticScopeTest do
                """)
              )
   end
+
+  test "static members can be read as values (X::CONSTANT)" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("statics", function() {
+                 it("reads static constants", function() {
+                   assert_equal(cfc.statics::LIMIT, 3);
+                   assert_equal(cfc.statics::GREETING, "hello");
+                 });
+               });
+               """)
+             )
+  end
 end

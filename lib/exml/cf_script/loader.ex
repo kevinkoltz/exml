@@ -382,10 +382,19 @@ defmodule ExML.CFScript.Loader do
           {[Lexer.token()], [Lexer.token()]}
   defp take_function_body(tokens, acc), do: take_function_body(tokens, acc, :pre, 0)
 
-  # :pre — before the body's opening brace; :body — inside the body.
+  # :pre — before the body's opening brace; :body — inside the body. In :pre the
+  # depth tracks PAREN nesting so a `{}`/`[]` in a parameter default (e.g.
+  # `params={}`) isn't mistaken for the body; the body `{` is the first one at
+  # paren-depth 0 (after the parameter list).
   defp take_function_body([], acc, _state, _depth), do: {Enum.reverse(acc), []}
 
-  defp take_function_body([{:op, "{", _} = t | rest], acc, :pre, _depth) do
+  defp take_function_body([{:op, "(", _} = t | rest], acc, :pre, paren),
+    do: take_function_body(rest, [t | acc], :pre, paren + 1)
+
+  defp take_function_body([{:op, ")", _} = t | rest], acc, :pre, paren),
+    do: take_function_body(rest, [t | acc], :pre, paren - 1)
+
+  defp take_function_body([{:op, "{", _} = t | rest], acc, :pre, 0) do
     take_function_body(rest, [t | acc], :body, 1)
   end
 

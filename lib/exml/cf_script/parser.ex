@@ -231,8 +231,10 @@ defmodule ExML.CFScript.Parser do
 
   defp take_optional_type(tokens), do: {nil, tokens}
 
+  # A parameter default after `=` or `:` (Lucee accepts both: `numeric x = 1`,
+  # `boolean flag: false`).
   @spec take_param_default([Lexer.token()]) :: {tuple() | nil, [Lexer.token()]}
-  defp take_param_default([{:op, "=", _} | rest]), do: parse_expr(rest)
+  defp take_param_default([{:op, sep, _} | rest]) when sep in ["=", ":"], do: parse_expr(rest)
   defp take_param_default(tokens), do: {nil, tokens}
 
   # Skip CFML parameter annotations (`hint="..."`, `displayname="..."`, ...) up to
