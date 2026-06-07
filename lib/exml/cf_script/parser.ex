@@ -253,11 +253,65 @@ defmodule ExML.CFScript.Parser do
       kw?(w, "for") -> parse_for(rest)
       kw?(w, "while") -> parse_while(rest)
       kw?(w, "try") -> parse_try(rest)
+      kw?(w, "switch") -> parse_switch(rest)
+      kw?(w, "break") -> {{:break}, drop_semicolon(rest)}
+      kw?(w, "continue") -> {{:continue}, drop_semicolon(rest)}
       true -> parse_expr_statement(tokens)
     end
   end
 
   defp parse_statement(tokens), do: parse_expr_statement(tokens)
+
+  # switch (expr) { case v: stmts... [break;] ... default: stmts... }
+  @spec parse_switch([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_switch(tokens) do
+    tokens = expect_op(tokens, "(")
+    {subject, tokens} = parse_expr(tokens)
+    tokens = expect_op(tokens, ")")
+    tokens = expect_op(tokens, "{")
+    {clauses, tokens} = parse_case_clauses(tokens, [])
+    {{:switch, subject, clauses}, expect_op(tokens, "}")}
+  end
+
+  @spec parse_case_clauses([Lexer.token()], [tuple()]) :: {[tuple()], [Lexer.token()]}
+  defp parse_case_clauses([{:op, "}"} | _] = tokens, acc), do: {Enum.reverse(acc), tokens}
+
+  defp parse_case_clauses([{:ident, w} | rest], acc) do
+    cond do
+      kw?(w, "case") ->
+        {value, rest} = parse_expr(rest)
+        rest = expect_op(rest, ":")
+        {stmts, rest} = parse_case_body(rest, [])
+        parse_case_clauses(rest, [{:case, value, stmts} | acc])
+
+      kw?(w, "default") ->
+        rest = expect_op(rest, ":")
+        {stmts, rest} = parse_case_body(rest, [])
+        parse_case_clauses(rest, [{:default, stmts} | acc])
+
+      true ->
+        raise "ExML.CFScript.Parser: expected case/default in switch, got #{w}"
+    end
+  end
+
+  # A case body runs until the next case/default label or the closing brace.
+  @spec parse_case_body([Lexer.token()], [tuple()]) :: {[tuple()], [Lexer.token()]}
+  defp parse_case_body([{:op, "}"} | _] = tokens, acc), do: {Enum.reverse(acc), tokens}
+  defp parse_case_body([{:op, ";"} | rest], acc), do: parse_case_body(rest, acc)
+
+  defp parse_case_body([{:ident, w} | _] = tokens, acc) do
+    if kw?(w, "case") or kw?(w, "default") do
+      {Enum.reverse(acc), tokens}
+    else
+      {stmt, rest} = parse_statement(tokens)
+      parse_case_body(rest, [stmt | acc])
+    end
+  end
+
+  defp parse_case_body(tokens, acc) do
+    {stmt, rest} = parse_statement(tokens)
+    parse_case_body(rest, [stmt | acc])
+  end
 
   @spec parse_if([Lexer.token()]) :: {tuple(), [Lexer.token()]}
   defp parse_if(tokens) do

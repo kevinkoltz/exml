@@ -15,7 +15,7 @@ defmodule ExML.CFScript.BIF.StringFns do
     len ucase lcase ucfirst left right mid trim ltrim rtrim
     find findnocase refind rematch reescape rereplace rereplacenocase replace
     replacenocase val valnumber reverse repeatstring
-    contains startswith endswith
+    contains startswith endswith rjustify ljustify cjustify
   )
 
   @impl true
@@ -186,6 +186,17 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   def call("endswith", [s, suffix]), do: String.ends_with?(Value.to_str(s), Value.to_str(suffix))
 
+  # Justify: pad with spaces to a field width (right/left/center justified).
+  def call("rjustify", [s, len]), do: String.pad_leading(Value.to_str(s), width(len))
+  def call("ljustify", [s, len]), do: String.pad_trailing(Value.to_str(s), width(len))
+
+  def call("cjustify", [s, len]) do
+    str = Value.to_str(s)
+    total = max(width(len) - String.length(str), 0)
+    left = div(total, 2)
+    String.duplicate(" ", left) <> str <> String.duplicate(" ", total - left)
+  end
+
   def call("reverse", [v]), do: String.reverse(Value.to_str(v))
 
   def call("repeatstring", [v, count]),
@@ -213,6 +224,9 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   @spec downcase(any()) :: String.t()
   defp downcase(v), do: String.downcase(Value.to_str(v))
+
+  @spec width(any()) :: non_neg_integer()
+  defp width(len), do: max(trunc(Value.to_number(len)), 0)
 
   @spec re_replace(any(), any(), any(), String.t(), String.t()) :: String.t()
   defp re_replace(s, pattern, replacement, scope, flags) do

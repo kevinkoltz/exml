@@ -25,4 +25,39 @@ function multi_field_sort(required data, required array sort_fields) localmode=t
 	<cfreturn "ignored" />
 </cffunction>
 
+<!--- Tag-bodied function exercising cfargument/cfif/cfset/cfreturn conversion. --->
+<cffunction name="describe_sign" returntype="string" output="false">
+	<cfargument name="n" required="true" type="numeric">
+	<cfset var label = "">
+	<cfif arguments.n GT 0>
+		<cfset label = "positive">
+	<cfelseif arguments.n LT 0>
+		<cfset label = "negative">
+	<cfelse>
+		<cfset label = "zero">
+	</cfif>
+	<cfreturn label>
+</cffunction>
+
+<!--- Tag-bodied function exercising cfswitch/cfcase/cfdefaultcase conversion. --->
+<cffunction name="day_name" returntype="string" output="false">
+	<cfargument name="dow" required="true" type="numeric">
+	<cfset var name = "">
+	<cfswitch expression="#arguments.dow#">
+		<cfcase value="1"><cfset name = "Mon"></cfcase>
+		<cfcase value="2"><cfset name = "Tue"></cfcase>
+		<cfdefaultcase><cfset name = "Other"></cfdefaultcase>
+	</cfswitch>
+	<cfreturn name>
+</cffunction>
+
+<!--- Unconvertible tag body (cfloop): must be dropped, not emitted broken. --->
+<cffunction name="tag_loop_fn" returntype="string">
+	<cfset var out = "">
+	<cfloop from="1" to="3" index="i">
+		<cfset out = out & i>
+	</cfloop>
+	<cfreturn out>
+</cffunction>
+
 </cfcomponent>

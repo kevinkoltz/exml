@@ -78,6 +78,63 @@ defmodule ExML.CFScript.ControlFlowTest do
              )
   end
 
+  test "switch matches a case and breaks" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("picks the matching case", function() {
+                   x = 2;
+                   out = "";
+                   switch (x) {
+                     case 1: out = "one"; break;
+                     case 2: out = "two"; break;
+                     default: out = "other";
+                   }
+                   assert_equal(out, "two");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "switch falls through to default when nothing matches" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("uses default", function() {
+                   out = "";
+                   switch (99) {
+                     case 1: out = "one"; break;
+                     default: out = "other";
+                   }
+                   assert_equal(out, "other");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "switch fall-through without break" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("falls through", function() {
+                   out = "";
+                   switch (1) {
+                     case 1: out &= "a";
+                     case 2: out &= "b"; break;
+                     case 3: out &= "c";
+                   }
+                   assert_equal(out, "ab");
+                 });
+               });
+               """)
+             )
+  end
+
   test "arrow functions: block body and implicit-return expression" do
     assert 1 ==
              passing(

@@ -11,12 +11,22 @@ defmodule ExML.CFScript.BIF.ConversionFns do
 
   alias ExML.CFScript.{CFException, Value}
 
-  @names ~w(javacast)
+  @names ~w(javacast int fix tostring abs round ceiling floor)
 
   @impl true
   def names, do: @names
 
+  # Int: integer part, truncated toward zero (Lucee Int()).
   @impl true
+  def call("int", [v]), do: trunc(Value.to_number(v))
+  def call("fix", [v]), do: trunc(Value.to_number(v))
+  def call("abs", [v]), do: abs(Value.to_number(v))
+  def call("round", [v]), do: round(Value.to_number(v))
+  def call("ceiling", [v]), do: v |> to_float() |> Float.ceil() |> trunc()
+  def call("floor", [v]), do: v |> to_float() |> Float.floor() |> trunc()
+  def call("tostring", [v]), do: Value.to_str(v)
+  def call("tostring", [v, _encoding]), do: Value.to_str(v)
+
   def call("javacast", [type, value]) do
     case String.downcase(Value.to_str(type)) do
       "null" -> nil
@@ -31,4 +41,7 @@ defmodule ExML.CFScript.BIF.ConversionFns do
   def call(name, args) do
     raise CFException, message: "#{name}() not supported for #{length(args)} argument(s)"
   end
+
+  @spec to_float(any()) :: float()
+  defp to_float(v), do: Value.to_number(v) * 1.0
 end

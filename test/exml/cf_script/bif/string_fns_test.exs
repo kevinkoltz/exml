@@ -140,4 +140,23 @@ defmodule ExML.CFScript.BIF.StringFnsTest do
       assert R.call("len", [%{"a" => 1}]) == 1
     end
   end
+
+  describe "justify (RJustify/LJustify/CJustify)" do
+    test "rJustify pads on the left to the field width" do
+      assert R.call("rjustify", ["5", 3]) == "  5"
+      assert R.call("rjustify", ["abc", 2]) == "abc"
+    end
+
+    test "lJustify pads on the right" do
+      assert R.call("ljustify", ["5", 3]) == "5  "
+    end
+
+    test "cJustify centers, extra space on the right" do
+      assert R.call("cjustify", ["x", 4]) == " x  "
+    end
+
+    test "rJustify + replace produces a zero-padded number (the `pad` idiom)" do
+      assert R.call("replace", [R.call("rjustify", ["5", 3]), " ", "0", "all"]) == "005"
+    end
+  end
 end

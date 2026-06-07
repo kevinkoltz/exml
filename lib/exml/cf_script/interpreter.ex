@@ -176,6 +176,28 @@ defmodule ExML.CFScript.Interpreter do
     end)
   end
 
+  # break/continue unwind via throw, caught by the enclosing switch (break only).
+  defp eval_stmt({:break}, _env), do: throw(:break)
+  defp eval_stmt({:continue}, _env), do: throw(:continue)
+
+  # switch: evaluate the subject, then run from the first matching `case` (or
+  # `default` if none match), falling through subsequent clauses until a `break`.
+  defp eval_stmt({:switch, subject_expr, clauses}, env) do
+    value = eval(subject_expr, env)
+
+    case switch_start_index(clauses, value, env) do
+      nil ->
+        nil
+
+      index ->
+        try do
+          clauses |> Enum.drop(index) |> Enum.each(&run_switch_clause(&1, env))
+        catch
+          :break -> nil
+        end
+    end
+  end
+
   # try { } catch (Type e) { } ... [finally { }]. `return`/loop control unwind
   # via throw, which `rescue` ignores (so they propagate) while `after` still
   # runs the finally block.
@@ -188,6 +210,23 @@ defmodule ExML.CFScript.Interpreter do
       Enum.each(finally, &eval_stmt(&1, env))
     end
   end
+
+  # The clause to start at: the first matching `case`, else the `default`, else
+  # nil (no clause runs).
+  @spec switch_start_index([tuple()], any(), Env.t()) :: non_neg_integer() | nil
+  defp switch_start_index(clauses, value, env) do
+    matched =
+      Enum.find_index(clauses, fn
+        {:case, value_expr, _stmts} -> Value.equals?(value, eval(value_expr, env))
+        {:default, _stmts} -> false
+      end)
+
+    matched || Enum.find_index(clauses, &match?({:default, _}, &1))
+  end
+
+  @spec run_switch_clause(tuple(), Env.t()) :: any()
+  defp run_switch_clause({:case, _value, stmts}, env), do: Enum.each(stmts, &eval_stmt(&1, env))
+  defp run_switch_clause({:default, stmts}, env), do: Enum.each(stmts, &eval_stmt(&1, env))
 
   # Loop guard: a generous cap so a buggy condition can't hang the interpreter.
   @max_iterations 5_000_000
