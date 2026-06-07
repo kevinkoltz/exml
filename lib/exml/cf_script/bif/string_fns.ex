@@ -13,7 +13,8 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   @names ~w(
     len ucase lcase ucfirst left right mid trim ltrim rtrim
-    find findnocase refind reescape val valnumber reverse repeatstring
+    find findnocase refind rematch reescape rereplace rereplacenocase replace
+    replacenocase val valnumber reverse repeatstring
   )
 
   @impl true
@@ -141,6 +142,40 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   def call("reescape", [v]), do: Regex.escape(Value.to_str(v))
 
+  # reMatch: all (non-overlapping) regex matches as an array of strings.
+  def call("rematch", [pattern, string]) do
+    case Regex.compile(Value.to_str(pattern)) do
+      {:ok, regex} -> Regex.scan(regex, Value.to_str(string)) |> Enum.map(&hd/1)
+      {:error, _} -> []
+    end
+  end
+
+  ## Replacement
+  #
+  # reReplace uses a regex; replace is literal. Default scope is "one" (first
+  # match); "all" replaces every match. Replacement backreferences (`\1`) work
+  # since CFML and Elixir use the same `\N` syntax.
+
+  def call("rereplace", [s, pattern, replacement]),
+    do: re_replace(s, pattern, replacement, "one", "")
+
+  def call("rereplace", [s, pattern, replacement, scope]),
+    do: re_replace(s, pattern, replacement, Value.to_str(scope), "")
+
+  def call("rereplacenocase", [s, pattern, replacement]),
+    do: re_replace(s, pattern, replacement, "one", "i")
+
+  def call("rereplacenocase", [s, pattern, replacement, scope]),
+    do: re_replace(s, pattern, replacement, Value.to_str(scope), "i")
+
+  def call("replace", [s, from, to]), do: literal_replace(s, from, to, "one")
+  def call("replace", [s, from, to, scope]), do: literal_replace(s, from, to, Value.to_str(scope))
+
+  def call("replacenocase", [s, from, to]), do: literal_replace_nocase(s, from, to, "one")
+
+  def call("replacenocase", [s, from, to, scope]),
+    do: literal_replace_nocase(s, from, to, Value.to_str(scope))
+
   ## Misc
 
   def call("reverse", [v]), do: String.reverse(Value.to_str(v))
@@ -170,6 +205,38 @@ defmodule ExML.CFScript.BIF.StringFns do
 
   @spec downcase(any()) :: String.t()
   defp downcase(v), do: String.downcase(Value.to_str(v))
+
+  @spec re_replace(any(), any(), any(), String.t(), String.t()) :: String.t()
+  defp re_replace(s, pattern, replacement, scope, flags) do
+    string = Value.to_str(s)
+
+    case Regex.compile(Value.to_str(pattern), flags) do
+      {:ok, regex} -> Regex.replace(regex, string, Value.to_str(replacement), global: all?(scope))
+      {:error, _} -> string
+    end
+  end
+
+  @spec literal_replace(any(), any(), any(), String.t()) :: String.t()
+  defp literal_replace(s, from, to, scope) do
+    String.replace(Value.to_str(s), Value.to_str(from), Value.to_str(to), global: all?(scope))
+  end
+
+  @spec literal_replace_nocase(any(), any(), any(), String.t()) :: String.t()
+  defp literal_replace_nocase(s, from, to, scope) do
+    pattern = Regex.compile!(Regex.escape(Value.to_str(from)), "i")
+
+    Regex.replace(pattern, Value.to_str(s), Value.to_str(to) |> escape_replacement(),
+      global: all?(scope)
+    )
+  end
+
+  # `replaceNoCase` is literal, so a `\` or group-looking sequence in the
+  # replacement must not be treated as a backreference.
+  @spec escape_replacement(String.t()) :: String.t()
+  defp escape_replacement(replacement), do: String.replace(replacement, "\\", "\\\\")
+
+  @spec all?(String.t()) :: boolean()
+  defp all?(scope), do: String.downcase(scope) == "all"
 
   @spec find_position(String.t(), String.t(), integer()) :: non_neg_integer()
   defp find_position(_haystack, "", _start), do: 0

@@ -639,12 +639,61 @@ defmodule ExML.CFScript.Parser do
         "ExML.CFScript.Parser: expected ':' or '=' in struct near #{inspect(Enum.take(tokens, 3))}"
       )
 
+  ## String interpolation
+
+  # CFML strings interpolate `#expr#` (both quote styles); `##` is a literal `#`.
+  # A string with no interpolation stays a `{:lit, ...}`; otherwise it becomes a
+  # `&`-concatenation (seeded with "" so the result is always a string).
+  @spec interpolate(String.t()) :: tuple()
+  defp interpolate(content) do
+    case split_interp(content, "", []) do
+      [] ->
+        {:lit, ""}
+
+      [{:lit, s}] ->
+        {:lit, s}
+
+      parts ->
+        Enum.reduce(parts, {:lit, ""}, fn part, acc -> {:binop, "&", acc, part_expr(part)} end)
+    end
+  end
+
+  @spec part_expr({:lit, String.t()} | {:expr, tuple()}) :: tuple()
+  defp part_expr({:lit, s}), do: {:lit, s}
+  defp part_expr({:expr, ast}), do: ast
+
+  @spec split_interp(binary(), binary(), [tuple()]) :: [tuple()]
+  defp split_interp(<<"##", rest::binary>>, buf, acc), do: split_interp(rest, buf <> "#", acc)
+
+  defp split_interp(<<"#", rest::binary>>, buf, acc) do
+    {inner, rest} = read_until_hash(rest, "")
+    {expr, _} = inner |> Lexer.tokenize() |> parse_expr()
+    split_interp(rest, "", [{:expr, expr} | flush_literal(buf, acc)])
+  end
+
+  defp split_interp(<<c::utf8, rest::binary>>, buf, acc),
+    do: split_interp(rest, buf <> <<c::utf8>>, acc)
+
+  defp split_interp("", buf, acc), do: Enum.reverse(flush_literal(buf, acc))
+
+  @spec flush_literal(binary(), [tuple()]) :: [tuple()]
+  defp flush_literal("", acc), do: acc
+  defp flush_literal(buf, acc), do: [{:lit, buf} | acc]
+
+  @spec read_until_hash(binary(), binary()) :: {binary(), binary()}
+  defp read_until_hash(<<"#", rest::binary>>, acc), do: {acc, rest}
+
+  defp read_until_hash(<<c::utf8, rest::binary>>, acc),
+    do: read_until_hash(rest, acc <> <<c::utf8>>)
+
+  defp read_until_hash("", acc), do: {acc, ""}
+
   ## Primary expressions
 
   @spec parse_primary([Lexer.token()]) :: {tuple(), [Lexer.token()]}
   defp parse_primary([{:int, n} | rest]), do: {{:lit, n}, rest}
   defp parse_primary([{:float, f} | rest]), do: {{:lit, f}, rest}
-  defp parse_primary([{:string, s} | rest]), do: {{:lit, s}, rest}
+  defp parse_primary([{:string, s} | rest]), do: {interpolate(s), rest}
 
   # `(params) => ...` arrow function, or a parenthesized expression.
   defp parse_primary([{:op, "("} | _] = tokens) do
