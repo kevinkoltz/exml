@@ -103,12 +103,16 @@ defmodule ExML.CFScript.Formatter do
 
   @spec stack_lines(Reporter.result(), boolean()) :: String.t()
   defp stack_lines(%{stack: stack}, color) when is_list(stack) and stack != [] do
-    Enum.map_join(stack, "\n", fn %{function: fun, source: source} ->
-      "      #{paint("at #{source}.#{fun}", [:faint], color)}"
+    Enum.map_join(stack, "\n", fn frame ->
+      "      #{paint("at #{frame.source}.#{frame.function}#{at_line(frame)}", [:faint], color)}"
     end)
   end
 
   defp stack_lines(_result, _color), do: ""
+
+  @spec at_line(map()) :: String.t()
+  defp at_line(%{line: line}) when is_integer(line), do: " (line #{line})"
+  defp at_line(_frame), do: ""
 
   ## Footer
 

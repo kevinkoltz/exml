@@ -41,6 +41,8 @@ defmodule ExML.CFScript.FormatterTest do
 
       assert Enum.map(result.stack, & &1.function) == ["inner", "boom", "run"]
       assert Enum.all?(result.stack, &(&1.source == "widget_spec.cfc"))
+      # declaration lines in the inline source (component { is line 1)
+      assert Enum.map(result.stack, & &1.line) == [2, 3, 4]
     end
 
     test "an assertion failure is a :fail with no backtrace" do
@@ -65,8 +67,8 @@ defmodule ExML.CFScript.FormatterTest do
       assert report =~ "● widgets › explodes"
       assert report =~ "MyError kaboom"
       assert report =~ "extra context"
-      assert report =~ "at widget_spec.cfc.inner"
-      assert report =~ "at widget_spec.cfc.boom"
+      assert report =~ "at widget_spec.cfc.inner (line 2)"
+      assert report =~ "at widget_spec.cfc.boom (line 3)"
 
       # assertion failures are labelled distinctly
       assert report =~ "ASSERTION Expected 3 but got 2"

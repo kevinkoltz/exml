@@ -23,6 +23,9 @@ defmodule ExML.CFScript.Lexer do
           | {:ident, binary()}
           | {:op, binary()}
 
+  # A token carrying its 1-based source line: `{type, value, line}`.
+  @type located :: {atom(), term(), pos_integer()}
+
   # Multi-character operators, longest first so we match greedily.
   @multi_ops [
     "==",
@@ -69,66 +72,80 @@ defmodule ExML.CFScript.Lexer do
     "@"
   ]
 
-  @doc "Tokenize `source` into a list of tokens. Raises on unterminated strings."
+  @doc "Tokenize to bare `{type, value}` tokens (no source positions)."
   @spec tokenize(binary()) :: [token()]
   def tokenize(source) when is_binary(source) do
     source
-    |> do_tokenize([])
+    |> tokenize_lines()
+    |> Enum.map(fn {type, value, _line} -> {type, value} end)
+  end
+
+  @doc "Tokenize to `{type, value, line}` tokens (1-based source line)."
+  @spec tokenize_lines(binary()) :: [located()]
+  def tokenize_lines(source) when is_binary(source) do
+    source
+    |> do_tokenize([], 1)
     |> Enum.reverse()
   end
 
-  @spec do_tokenize(binary(), [token()]) :: [token()]
-  defp do_tokenize("", acc), do: acc
+  @spec do_tokenize(binary(), [located()], pos_integer()) :: [located()]
+  defp do_tokenize("", acc, _line), do: acc
 
-  # Whitespace
-  defp do_tokenize(<<c::utf8, rest::binary>>, acc) when c in [?\s, ?\t, ?\n, ?\r] do
-    do_tokenize(rest, acc)
+  # Whitespace (track newlines)
+  defp do_tokenize(<<?\n, rest::binary>>, acc, line), do: do_tokenize(rest, acc, line + 1)
+
+  defp do_tokenize(<<c::utf8, rest::binary>>, acc, line) when c in [?\s, ?\t, ?\r] do
+    do_tokenize(rest, acc, line)
   end
 
   # Line comment
-  defp do_tokenize(<<"//", rest::binary>>, acc) do
-    rest |> skip_line() |> do_tokenize(acc)
+  defp do_tokenize(<<"//", rest::binary>>, acc, line) do
+    rest |> skip_line() |> do_tokenize(acc, line + 1)
   end
 
   # Block comment
-  defp do_tokenize(<<"/*", rest::binary>>, acc) do
-    rest |> skip_block_comment() |> do_tokenize(acc)
+  defp do_tokenize(<<"/*", rest::binary>>, acc, line) do
+    {rest, newlines} = skip_block_comment(rest, 0)
+    do_tokenize(rest, acc, line + newlines)
   end
 
   # Strings (double or single quoted)
-  defp do_tokenize(<<?", rest::binary>>, acc) do
+  defp do_tokenize(<<?", rest::binary>>, acc, line) do
     {value, rest} = read_string(rest, ?", "")
-    do_tokenize(rest, [{:string, value} | acc])
+    do_tokenize(rest, [{:string, value, line} | acc], line + newlines(value))
   end
 
-  defp do_tokenize(<<?', rest::binary>>, acc) do
+  defp do_tokenize(<<?', rest::binary>>, acc, line) do
     {value, rest} = read_string(rest, ?', "")
-    do_tokenize(rest, [{:string, value} | acc])
+    do_tokenize(rest, [{:string, value, line} | acc], line + newlines(value))
   end
 
   # Numbers
-  defp do_tokenize(<<c::utf8, _::binary>> = bin, acc) when c in ?0..?9 do
-    {token, rest} = read_number(bin)
-    do_tokenize(rest, [token | acc])
+  defp do_tokenize(<<c::utf8, _::binary>> = bin, acc, line) when c in ?0..?9 do
+    {{type, value}, rest} = read_number(bin)
+    do_tokenize(rest, [{type, value, line} | acc], line)
   end
 
   # Identifiers (letter or underscore start)
-  defp do_tokenize(<<c::utf8, _::binary>> = bin, acc)
+  defp do_tokenize(<<c::utf8, _::binary>> = bin, acc, line)
        when c in ?a..?z or c in ?A..?Z or c == ?_ do
     {name, rest} = read_ident(bin, "")
-    do_tokenize(rest, [{:ident, name} | acc])
+    do_tokenize(rest, [{:ident, name, line} | acc], line)
   end
 
   # Operators / punctuation
-  defp do_tokenize(bin, acc) do
+  defp do_tokenize(bin, acc, line) do
     case match_op(bin) do
       {op, rest} ->
-        do_tokenize(rest, [{:op, op} | acc])
+        do_tokenize(rest, [{:op, op, line} | acc], line)
 
       :error ->
         raise "ExML.CFScript.Lexer: unexpected character at #{inspect(String.slice(bin, 0, 20))}"
     end
   end
+
+  @spec newlines(binary()) :: non_neg_integer()
+  defp newlines(text), do: text |> :binary.matches("\n") |> length()
 
   ## Helpers
 
@@ -137,10 +154,11 @@ defmodule ExML.CFScript.Lexer do
   defp skip_line(<<_::utf8, rest::binary>>), do: skip_line(rest)
   defp skip_line(""), do: ""
 
-  @spec skip_block_comment(binary()) :: binary()
-  defp skip_block_comment(<<"*/", rest::binary>>), do: rest
-  defp skip_block_comment(<<_::utf8, rest::binary>>), do: skip_block_comment(rest)
-  defp skip_block_comment(""), do: ""
+  @spec skip_block_comment(binary(), non_neg_integer()) :: {binary(), non_neg_integer()}
+  defp skip_block_comment(<<"*/", rest::binary>>, nls), do: {rest, nls}
+  defp skip_block_comment(<<?\n, rest::binary>>, nls), do: skip_block_comment(rest, nls + 1)
+  defp skip_block_comment(<<_::utf8, rest::binary>>, nls), do: skip_block_comment(rest, nls)
+  defp skip_block_comment("", nls), do: {"", nls}
 
   # Read a string body until the matching closing quote. A doubled quote
   # (`""` / `''`) is an escaped literal quote. The body is interpolation-aware:

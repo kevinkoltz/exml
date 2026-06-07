@@ -294,11 +294,17 @@ defmodule ExML.CFScript.Interpreter do
     }
   end
 
-  # A CFML-style stack trace string: one "at source.function" line per frame.
+  # A CFML-style stack trace string: one "at source.function (line N)" per frame.
   @spec render_stack([CFException.frame()]) :: String.t()
   defp render_stack(frames) do
-    Enum.map_join(frames, "\n", fn %{function: fun, source: source} -> "at #{source}.#{fun}" end)
+    Enum.map_join(frames, "\n", fn frame ->
+      "at #{frame.source}.#{frame.function}#{at_line(frame)}"
+    end)
   end
+
+  @spec at_line(CFException.frame()) :: String.t()
+  defp at_line(%{line: line}) when is_integer(line), do: " (line #{line})"
+  defp at_line(_frame), do: ""
 
   # What `for (x in coll)` iterates: array values, struct keys, or list elements.
   @spec iterable_items(any()) :: [any()]
@@ -692,7 +698,7 @@ defmodule ExML.CFScript.Interpreter do
       ctx: ctx
     }
 
-    CallStack.push(func.name, type_path || "<anonymous>")
+    CallStack.push(func.name, type_path || "<anonymous>", func.line)
 
     try do
       bind_params(func.params, pos, named, arguments, base_env)

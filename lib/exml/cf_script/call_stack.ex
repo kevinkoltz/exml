@@ -11,16 +11,16 @@ defmodule ExML.CFScript.CallStack do
 
   @key __MODULE__
 
-  @type frame :: %{function: String.t(), source: String.t()}
+  @type frame :: %{function: String.t(), source: String.t(), line: pos_integer() | nil}
 
   @doc "Clear the stack (call at the start of a run)."
   @spec reset() :: :ok
   def reset, do: put([])
 
-  @doc "Push a frame as a function call is entered."
-  @spec push(String.t(), String.t()) :: :ok
-  def push(function, source) do
-    put([%{function: function, source: source} | frames()])
+  @doc "Push a frame as a function call is entered (`line` is its declaration line)."
+  @spec push(String.t(), String.t(), pos_integer() | nil) :: :ok
+  def push(function, source, line \\ nil) do
+    put([%{function: function, source: source, line: line} | frames()])
   end
 
   @doc "Pop the innermost frame as a call returns."

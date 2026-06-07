@@ -10,7 +10,7 @@ defmodule ExML.CFScript.CFException do
 
   defexception [:message, cf_type: "Application", detail: "", stack: []]
 
-  @type frame :: %{function: String.t(), source: String.t()}
+  @type frame :: %{function: String.t(), source: String.t(), line: pos_integer() | nil}
   @type t :: %__MODULE__{
           message: String.t(),
           cf_type: String.t(),

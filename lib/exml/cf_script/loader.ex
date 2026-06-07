@@ -69,7 +69,35 @@ defmodule ExML.CFScript.Loader do
       |> strip_component_wrapper()
 
     {functions, static_init} = parse_members_leniently(tokens, label, [], [])
+    functions = attach_lines(functions, source)
     %AST.Component{functions: functions, extends: extends, static_init: static_init}
+  end
+
+  # Tag conversion rewrites the source and shifts lines, so the parsed AST can't
+  # carry reliable positions. Instead, scan the *original* source for each
+  # function's declaration line — accurate for both `<cffunction name="x">` (tag)
+  # and `function x(` (cfscript) forms — and stamp it onto the function.
+  @spec attach_lines([AST.Function.t()], String.t()) :: [AST.Function.t()]
+  defp attach_lines(functions, source) do
+    line_map = function_line_map(source)
+    Enum.map(functions, fn f -> %{f | line: Map.get(line_map, String.downcase(f.name))} end)
+  end
+
+  @decl_re ~r/<cffunction\b[^>]*\bname\s*=\s*"([^"]+)"|(?:^|\s)function\s+([A-Za-z_]\w*)\s*\(/i
+  @spec function_line_map(String.t()) :: %{optional(String.t()) => pos_integer()}
+  defp function_line_map(source) do
+    source
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.reduce(%{}, fn {text, line}, acc ->
+      case Regex.run(@decl_re, text, capture: :all_but_first) do
+        nil ->
+          acc
+
+        captures ->
+          Map.put_new(acc, captures |> Enum.find(&(&1 != "")) |> String.downcase(), line)
+      end
+    end)
   end
 
   ## File resolution

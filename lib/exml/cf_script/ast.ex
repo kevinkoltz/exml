@@ -29,9 +29,16 @@ defmodule ExML.CFScript.AST do
             static: boolean(),
             localmode: boolean(),
             return_type: String.t() | nil,
-            body: [tuple()]
+            body: [tuple()],
+            line: pos_integer() | nil
           }
-    defstruct name: nil, params: [], static: false, localmode: false, return_type: nil, body: []
+    defstruct name: nil,
+              params: [],
+              static: false,
+              localmode: false,
+              return_type: nil,
+              body: [],
+              line: nil
   end
 
   defmodule Param do
