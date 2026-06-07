@@ -12,7 +12,7 @@ defmodule ExML.CFScript.Query do
   writes a mutator's result back into the query's heap cell.
   """
 
-  alias ExML.CFScript.{CFException, Value}
+  alias ExML.CFScript.{CFException, Struct, Value}
 
   @type t :: %__MODULE__{columns: [String.t()], rows: [%{optional(String.t()) => any()}]}
   defstruct columns: [], rows: []
@@ -65,7 +65,7 @@ defmodule ExML.CFScript.Query do
   @doc "Append a row from a struct map (missing columns become empty string)."
   @spec add_row(t(), map()) :: t()
   def add_row(%__MODULE__{columns: columns, rows: rows} = query, data) when is_map(data) do
-    row = for col <- columns, into: %{}, do: {down(col), Map.get(data, down(col), "")}
+    row = for col <- columns, into: %{}, do: {down(col), Struct.get(data, col, "")}
     %{query | rows: rows ++ [row]}
   end
 

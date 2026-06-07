@@ -21,6 +21,7 @@ defmodule ExML.CFScript.Interpreter do
     Loader,
     Query,
     Scope,
+    Struct,
     Value
   }
 
@@ -199,7 +200,7 @@ defmodule ExML.CFScript.Interpreter do
   defp assign({:member, obj_ast, name}, value, env) do
     case eval(obj_ast, env) do
       %StructRef{} = ref ->
-        Heap.write(ref, Map.put(Heap.deref(ref), String.downcase(name), value))
+        Heap.write(ref, Struct.put(Heap.deref(ref), name, value))
         value
 
       %Instance{variables: variables} ->
@@ -221,7 +222,7 @@ defmodule ExML.CFScript.Interpreter do
         value
 
       %StructRef{} = ref ->
-        Heap.write(ref, Map.put(Heap.deref(ref), String.downcase(Value.to_str(key)), value))
+        Heap.write(ref, Struct.put(Heap.deref(ref), Value.to_str(key), value))
         value
 
       other ->
@@ -277,9 +278,18 @@ defmodule ExML.CFScript.Interpreter do
     Heap.new_array(Enum.map(elements, &eval(&1, env)))
   end
 
+  # Struct literal: keys keep their original case (CFML structs are
+  # case-preserving). With full-null-support off, a null value means the key is
+  # absent, so such pairs are dropped.
   defp eval({:struct, pairs}, env) do
+    keep_nulls = env.ctx.null_support
+
     map =
-      for {key, value_ast} <- pairs, into: %{}, do: {String.downcase(key), eval(value_ast, env)}
+      for {key, value_ast} <- pairs,
+          value = eval(value_ast, env),
+          keep_nulls or not is_nil(value),
+          into: %{},
+          do: {key, value}
 
     Heap.new_struct(map)
   end
@@ -411,7 +421,7 @@ defmodule ExML.CFScript.Interpreter do
 
     query = Query.from_result(executor.(sql, params))
 
-    case options |> Map.get("returntype") |> normalize_return_type() do
+    case options |> Struct.get("returntype") |> normalize_return_type() do
       "array" ->
         query |> Query.to_array() |> Enum.map(&Heap.new_struct/1) |> Heap.new_array()
 
@@ -573,7 +583,7 @@ defmodule ExML.CFScript.Interpreter do
   end
 
   defp eval_member(%StructRef{} = ref, name, env) do
-    case Map.fetch(Heap.deref(ref), String.downcase(name)) do
+    case Struct.fetch(Heap.deref(ref), name) do
       {:ok, value} -> value
       :error -> missing_key(name, env)
     end
@@ -598,7 +608,7 @@ defmodule ExML.CFScript.Interpreter do
   end
 
   defp eval_member(map, name, env) when is_map(map) do
-    case Map.fetch(map, String.downcase(name)) do
+    case Struct.fetch(map, name) do
       {:ok, value} -> value
       :error -> missing_key(name, env)
     end
@@ -641,7 +651,7 @@ defmodule ExML.CFScript.Interpreter do
 
   @spec struct_index(map(), String.t(), Env.t()) :: any()
   defp struct_index(map, key, env) do
-    case Map.fetch(map, key) do
+    case Struct.fetch(map, key) do
       {:ok, value} -> value
       :error -> missing_key(key, env)
     end
