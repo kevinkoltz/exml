@@ -464,6 +464,11 @@ defmodule ExML.CFScript.Interpreter do
   defp eval_binop(">", l, r), do: Value.compare(l, r) == :gt
   defp eval_binop("<=", l, r), do: Value.compare(l, r) in [:lt, :eq]
   defp eval_binop(">=", l, r), do: Value.compare(l, r) in [:gt, :eq]
+
+  # CFML `contains` operator (Lucee OP_DEC_CT): case-insensitive substring test.
+  defp eval_binop("contains", l, r),
+    do: String.contains?(String.downcase(Value.to_str(l)), String.downcase(Value.to_str(r)))
+
   defp eval_binop("+", l, r), do: Value.to_number(l) + Value.to_number(r)
   defp eval_binop("-", l, r), do: Value.to_number(l) - Value.to_number(r)
   defp eval_binop("*", l, r), do: Value.to_number(l) * Value.to_number(r)

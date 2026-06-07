@@ -602,7 +602,8 @@ defmodule ExML.CFScript.Parser do
     {"gte", ">="},
     {"le", "<="},
     {"ge", ">="},
-    {"is", "=="}
+    {"is", "=="},
+    {"contains", "contains"}
   ]
   defp parse_comparison(tokens), do: parse_binop_level(tokens, &parse_concat/1, @comparisons)
 
