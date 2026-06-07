@@ -172,4 +172,14 @@ defmodule ExML.CFScript.BIF.StringFnsTest do
       assert R.call("asc", [""]) == 0
     end
   end
+
+  describe "urlEncodedFormat (Lucee parity)" do
+    test "space -> %20 and -._ are percent-encoded" do
+      assert R.call("urlEncodedFormat", ["a b-c.d_e*f"]) == "a%20b%2Dc%2Ed%5Fe%2Af"
+    end
+
+    test "reserved characters are encoded" do
+      assert R.call("urlEncodedFormat", ["hello world & x"]) == "hello%20world%20%26%20x"
+    end
+  end
 end

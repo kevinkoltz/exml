@@ -16,6 +16,7 @@ defmodule ExML.CFScript.BIF.StringFns do
     find findnocase refind rematch reescape rereplace rereplacenocase replace
     replacenocase val valnumber reverse repeatstring
     contains startswith endswith rjustify ljustify cjustify chr asc
+    urlencodedformat
   )
 
   @impl true
@@ -205,6 +206,19 @@ defmodule ExML.CFScript.BIF.StringFns do
       "" -> 0
       <<first::utf8, _rest::binary>> -> first
     end
+  end
+
+  # urlEncodedFormat — Lucee: www-form-encode, then percent-encode the chars
+  # Java's encoder leaves (`+`->%20, `*`->%2A, `-`->%2D, `.`->%2E, `_`->%5F).
+  # `URI.encode_www_form` already yields %2A for `*`, so the rest is replacement.
+  def call("urlencodedformat", [v]) do
+    v
+    |> Value.to_str()
+    |> URI.encode_www_form()
+    |> String.replace("+", "%20")
+    |> String.replace("-", "%2D")
+    |> String.replace(".", "%2E")
+    |> String.replace("_", "%5F")
   end
 
   def call("reverse", [v]), do: String.reverse(Value.to_str(v))

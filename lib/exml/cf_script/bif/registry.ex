@@ -16,7 +16,8 @@ defmodule ExML.CFScript.BIF.Registry do
     ListFns,
     QueryFns,
     StringFns,
-    StructFns
+    StructFns,
+    SystemFns
   }
 
   @families [
@@ -27,7 +28,8 @@ defmodule ExML.CFScript.BIF.Registry do
     StructFns,
     QueryFns,
     ConversionFns,
-    DateFns
+    DateFns,
+    SystemFns
   ]
 
   @table for family <- @families,

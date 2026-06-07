@@ -66,8 +66,10 @@ actually *implement* these rather than mark them:
   cgi/server/url/form are seeded).
 - [ ] **Timezone-aware `dateConvert`** — dates are timezone-naive today.
 - [ ] **Wider BIF coverage** — add string/date/list/struct/math BIFs as specs
-  require them. The sweep surfaced missing: `writeOutput`, `URLEncodedFormat`,
-  `structDebug`/`structGet`, and a few others.
+  require them. Done: `writeOutput`/`writeDump`/`dump` (no-ops), `URLEncodedFormat`.
+  Still missing (seen in the sweep): `structDebug`/`structGet`, and the cfscript
+  *function* forms of IO tags (`cfhttp(...)`, etc. — distinct from the `<cfhttp>`
+  tag the converter already markerizes).
 - [x] **Parameter `:` default + static-member reads** — `boolean flag: false`
   (Lucee's colon default) parses; `cfc.X::CONSTANT` reads a static value.
 
