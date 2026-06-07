@@ -13,7 +13,10 @@ defmodule ExML.CFScript.Reporter do
           status: status(),
           group: String.t(),
           description: String.t(),
-          message: String.t() | nil
+          message: String.t() | nil,
+          type: String.t() | nil,
+          detail: String.t() | nil,
+          stack: [%{function: String.t(), source: String.t()}]
         }
 
   @doc "Begin a fresh collection."
@@ -35,15 +38,21 @@ defmodule ExML.CFScript.Reporter do
     update(fn s -> %{s | groups: Enum.drop(s.groups, -1)} end)
   end
 
-  @doc "Record a result for the current group."
-  @spec record(status(), String.t(), String.t() | nil) :: :ok
-  def record(status, description, message \\ nil) do
+  @doc """
+  Record a result for the current group. `meta` may carry `:type`, `:detail`,
+  and `:stack` for a failed/errored test.
+  """
+  @spec record(status(), String.t(), String.t() | nil, keyword()) :: :ok
+  def record(status, description, message \\ nil, meta \\ []) do
     update(fn s ->
       result = %{
         status: status,
         group: Enum.join(s.groups, " › "),
         description: description,
-        message: message
+        message: message,
+        type: meta[:type],
+        detail: meta[:detail],
+        stack: meta[:stack] || []
       }
 
       %{s | results: [result | s.results]}

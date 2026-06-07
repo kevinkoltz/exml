@@ -9,7 +9,17 @@ defmodule ExML.CFScript.Runner do
   `.cfc` sources under `cfc_root`.
   """
 
-  alias ExML.CFScript.{CFException, Context, Interpreter, Loader, Reporter, Scope, Value}
+  alias ExML.CFScript.{
+    CallStack,
+    CFException,
+    Context,
+    Interpreter,
+    Loader,
+    Reporter,
+    Scope,
+    Value
+  }
+
   alias ExML.CFScript.Value.Native
 
   @type result :: Reporter.result()
@@ -63,10 +73,12 @@ defmodule ExML.CFScript.Runner do
       instance = Interpreter.instantiate(component, label, ctx)
 
       Reporter.start()
+      CallStack.reset()
 
       try do
         Interpreter.call_instance_method(instance, "run", [], ctx)
       rescue
+        e in CFException -> Reporter.record(:error, "run()", e.message, error_meta(e))
         e -> Reporter.record(:error, "run()", Exception.message(e))
       catch
         :throw, value -> Reporter.record(:error, "run()", "uncaught throw: #{inspect(value)}")
@@ -126,7 +138,16 @@ defmodule ExML.CFScript.Runner do
     try do
       Interpreter.invoke(body, [], env)
     rescue
-      e -> Reporter.record(:error, "describe(#{Value.to_str(description)})", Exception.message(e))
+      e in CFException ->
+        Reporter.record(
+          :error,
+          "describe(#{Value.to_str(description)})",
+          e.message,
+          error_meta(e)
+        )
+
+      e ->
+        Reporter.record(:error, "describe(#{Value.to_str(description)})", Exception.message(e))
     after
       Reporter.pop_group()
     end
@@ -141,7 +162,7 @@ defmodule ExML.CFScript.Runner do
       Interpreter.invoke(body, [], env)
       Reporter.record(:pass, desc)
     rescue
-      e in CFException -> Reporter.record(:fail, desc, e.message)
+      e in CFException -> Reporter.record(status_for(e), desc, e.message, error_meta(e))
       e -> Reporter.record(:error, desc, Exception.message(e))
     catch
       :throw, value -> Reporter.record(:error, desc, "uncaught throw: #{inspect(value)}")
@@ -149,6 +170,15 @@ defmodule ExML.CFScript.Runner do
 
     nil
   end
+
+  # An assertion failure is a test `:fail`; any other thrown exception is an
+  # `:error` (an unexpected runtime fault).
+  @spec status_for(CFException.t()) :: :fail | :error
+  defp status_for(%CFException{cf_type: "AssertionError"}), do: :fail
+  defp status_for(%CFException{}), do: :error
+
+  @spec error_meta(CFException.t()) :: keyword()
+  defp error_meta(%CFException{} = e), do: [type: e.cf_type, detail: e.detail, stack: e.stack]
 
   defp xit([description | _], _env) do
     Reporter.record(:pass, "#{Value.to_str(description)} (skipped)")
@@ -229,20 +259,20 @@ defmodule ExML.CFScript.Runner do
           cf_type: "AssertionError",
           message: "Expected an exception but none was thrown"
 
-      {:threw, type, message} ->
-        check_throw_type(expected_type, type)
-        check_throw_message(expected_message, message)
+      {:threw, %CFException{} = e} ->
+        check_throw_type(expected_type, e.cf_type)
+        check_throw_message(expected_message, e.message)
         nil
     end
   end
 
-  @spec run_callback(any(), term()) :: :no_throw | {:threw, String.t(), String.t()}
+  @spec run_callback(any(), term()) :: :no_throw | {:threw, CFException.t()}
   defp run_callback(callback, env) do
     Interpreter.invoke(callback, [], env)
     :no_throw
   rescue
-    e in CFException -> {:threw, e.cf_type, e.message}
-    e -> {:threw, "Application", Exception.message(e)}
+    e in CFException -> {:threw, e}
+    e -> {:threw, %CFException{cf_type: "Application", message: Exception.message(e)}}
   end
 
   defp check_throw_type("", _type), do: :ok

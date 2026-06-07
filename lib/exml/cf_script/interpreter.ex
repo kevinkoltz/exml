@@ -13,6 +13,7 @@ defmodule ExML.CFScript.Interpreter do
 
   alias ExML.CFScript.{
     AST,
+    CallStack,
     CFException,
     Collections,
     Context,
@@ -274,23 +275,29 @@ defmodule ExML.CFScript.Interpreter do
 
   # Build the CFML cfcatch struct from a raised exception.
   @spec exception_struct(Exception.t()) :: map()
-  defp exception_struct(%CFException{message: msg, cf_type: type, detail: detail}) do
-    base_exception(type, msg, detail)
+  defp exception_struct(%CFException{message: msg, cf_type: type, detail: detail, stack: stack}) do
+    base_exception(type, msg, detail, stack)
   end
 
   defp exception_struct(error) do
-    base_exception("Application", Exception.message(error), "")
+    base_exception("Application", Exception.message(error), "", CallStack.frames())
   end
 
-  defp base_exception(type, message, detail) do
+  defp base_exception(type, message, detail, stack) do
     %{
       "type" => to_string(type),
       "message" => to_string(message),
       "detail" => to_string(detail),
       "errorcode" => "",
       "extendedinfo" => "",
-      "stacktrace" => ""
+      "stacktrace" => render_stack(stack)
     }
+  end
+
+  # A CFML-style stack trace string: one "at source.function" line per frame.
+  @spec render_stack([CFException.frame()]) :: String.t()
+  defp render_stack(frames) do
+    Enum.map_join(frames, "\n", fn %{function: fun, source: source} -> "at #{source}.#{fun}" end)
   end
 
   # What `for (x in coll)` iterates: array values, struct keys, or list elements.
@@ -685,9 +692,23 @@ defmodule ExML.CFScript.Interpreter do
       ctx: ctx
     }
 
-    bind_params(func.params, pos, named, arguments, base_env)
-    run_body(func.body, base_env)
+    CallStack.push(func.name, type_path || "<anonymous>")
+
+    try do
+      bind_params(func.params, pos, named, arguments, base_env)
+      run_body(func.body, base_env)
+    rescue
+      e in CFException -> reraise with_stack(e), __STACKTRACE__
+    after
+      CallStack.pop()
+    end
   end
+
+  # Snapshot the call stack onto an exception the first time it crosses a call
+  # boundary (the innermost frame, so the full chain is captured).
+  @spec with_stack(CFException.t()) :: CFException.t()
+  defp with_stack(%CFException{stack: []} = e), do: %{e | stack: CallStack.frames()}
+  defp with_stack(%CFException{} = e), do: e
 
   # The component's shared `static` scope, created and populated (by running the
   # `static { ... }` initializer once) on first use. Keyed by type_path so all

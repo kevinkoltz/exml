@@ -115,7 +115,8 @@ defmodule ExML.CFScript.LoaderTest do
       """)
 
     assert summary.failed == 1
-    assert [%{status: :fail, message: message}] = summary.results
+    # A missing function is an unexpected runtime fault, not an assertion failure.
+    assert [%{status: :error, message: message}] = summary.results
     assert message =~ "tag_file_fn"
   end
 end
