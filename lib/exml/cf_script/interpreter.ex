@@ -323,8 +323,8 @@ defmodule ExML.CFScript.Interpreter do
   defp exec_query(args, %Env{ctx: ctx}) do
     executor = ctx.query_executor || no_executor()
     sql = Value.to_str(Enum.at(args, 0))
-    params = Heap.deref(Enum.at(args, 1, %{}))
-    options = Heap.deref(Enum.at(args, 2, %{}))
+    params = Collections.deep_deref(Enum.at(args, 1, %{}))
+    options = Collections.deep_deref(Enum.at(args, 2, %{}))
 
     query = Query.from_result(executor.(sql, params))
 

@@ -125,6 +125,30 @@ defmodule ExML.CFScript.QueryTest do
              )
   end
 
+  test "executor receives plain deep-derefed params (no heap refs)" do
+    test_pid = self()
+
+    executor = fn sql, params ->
+      send(test_pid, {:executed, sql, params})
+      %{columns: ["ok"], rows: [[1]]}
+    end
+
+    run(
+      """
+      describe("q", function() {
+        it("passes params", function() {
+          queryExecute("DELETE FROM t WHERE id = :id", { id: { value: "ABC", sqltype: "char" } });
+        });
+      });
+      """,
+      query_executor: executor
+    )
+
+    assert_received {:executed, "DELETE FROM t WHERE id = :id", params}
+    # Named param + nested {value, sqltype} descriptor arrive as plain maps.
+    assert params == %{"id" => %{"value" => "ABC", "sqltype" => "char"}}
+  end
+
   test "queryExecute without an executor raises a clear error" do
     summary =
       run("""

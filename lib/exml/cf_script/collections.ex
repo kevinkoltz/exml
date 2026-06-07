@@ -124,6 +124,27 @@ defmodule ExML.CFScript.Collections do
   defp mutator_return("queryaddcolumn", %Query{} = q), do: Query.column_count(q)
   defp mutator_return(_name, _new), do: true
 
+  @doc """
+  Recursively resolve references to plain Elixir values (lists/maps/scalars).
+
+  Used at the `queryExecute` boundary so a host executor (e.g. a Macola.Repo
+  adapter) receives ordinary data — including nested `{value:, sqltype:}` param
+  descriptors — rather than heap references.
+  """
+  @spec deep_deref(any()) :: any()
+  def deep_deref(value) do
+    case Heap.deref(value) do
+      list when is_list(list) ->
+        Enum.map(list, &deep_deref/1)
+
+      map when is_map(map) and not is_struct(map) ->
+        Map.new(map, fn {k, v} -> {k, deep_deref(v)} end)
+
+      other ->
+        other
+    end
+  end
+
   ## Deref / wrap
 
   @spec deref_all([any()]) :: [any()]
