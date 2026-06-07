@@ -115,6 +115,70 @@ defmodule ExML.CFScript.Interpreter do
     end
   end
 
+  # `x++` / `x--` — increment/decrement an lvalue by 1.
+  defp eval_stmt({:incr, target, op}, env) do
+    current = Value.to_number(eval(target, env))
+    delta = if op == "+", do: 1, else: -1
+    assign(target, current + delta, env)
+  end
+
+  # C-style for: run init, then loop while cond is truthy, running body then incr.
+  defp eval_stmt({:for, init, cond_expr, incr, body}, env) do
+    eval_stmt(init, env)
+
+    loop_while(fn -> Value.truthy?(eval(cond_expr, env)) end, fn ->
+      Enum.each(body, &eval_stmt(&1, env))
+      eval_stmt(incr, env)
+    end)
+  end
+
+  # for-in: iterate the collection's elements (array values / struct keys /
+  # query row indices), binding `name` each iteration.
+  defp eval_stmt({:for_in, name, coll_expr, body}, env) do
+    coll_expr
+    |> eval(env)
+    |> iterable_items()
+    |> Enum.each(fn item ->
+      assign({:var, name}, item, env)
+      Enum.each(body, &eval_stmt(&1, env))
+    end)
+  end
+
+  defp eval_stmt({:while, cond_expr, body}, env) do
+    loop_while(fn -> Value.truthy?(eval(cond_expr, env)) end, fn ->
+      Enum.each(body, &eval_stmt(&1, env))
+    end)
+  end
+
+  # Loop guard: a generous cap so a buggy condition can't hang the interpreter.
+  @max_iterations 5_000_000
+  @spec loop_while((-> boolean()), (-> any())) :: :ok
+  defp loop_while(condition, body), do: loop_while(condition, body, 0)
+
+  defp loop_while(_condition, _body, n) when n >= @max_iterations do
+    raise CFException,
+      message: "loop exceeded #{@max_iterations} iterations (possible infinite loop)"
+  end
+
+  defp loop_while(condition, body, n) do
+    if condition.() do
+      body.()
+      loop_while(condition, body, n + 1)
+    else
+      :ok
+    end
+  end
+
+  # What `for (x in coll)` iterates: array values, struct keys, or list elements.
+  @spec iterable_items(any()) :: [any()]
+  defp iterable_items(value) do
+    case Heap.deref(value) do
+      list when is_list(list) -> list
+      map when is_map(map) and not is_struct(map) -> Map.keys(map)
+      other -> raise CFException, message: "Cannot iterate over #{Value.display(other)}"
+    end
+  end
+
   ## Assignment
 
   @spec assign(tuple(), any(), Env.t()) :: any()

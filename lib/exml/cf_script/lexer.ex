@@ -24,7 +24,24 @@ defmodule ExML.CFScript.Lexer do
           | {:op, binary()}
 
   # Multi-character operators, longest first so we match greedily.
-  @multi_ops ["==", "!=", "<=", ">=", "&&", "||", "::", "=>", "<>", "++", "--", "+=", "-="]
+  @multi_ops [
+    "==",
+    "!=",
+    "<=",
+    ">=",
+    "&&",
+    "||",
+    "::",
+    "=>",
+    "<>",
+    "++",
+    "--",
+    "+=",
+    "-=",
+    "&=",
+    "*=",
+    "/="
+  ]
 
   @single_ops [
     "&",

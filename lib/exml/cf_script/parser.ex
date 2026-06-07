@@ -58,6 +58,13 @@ defmodule ExML.CFScript.Parser do
     func
   end
 
+  @doc "Parse a list of statements from tokens (e.g. a `static {...}` block body)."
+  @spec parse_statements_from_tokens([Lexer.token()]) :: [tuple()]
+  def parse_statements_from_tokens(tokens) do
+    {stmts, _rest} = parse_statements(tokens, [])
+    stmts
+  end
+
   ## Component / function declarations
 
   @spec do_parse_component([Lexer.token()]) :: AST.Component.t()
@@ -243,6 +250,8 @@ defmodule ExML.CFScript.Parser do
       kw?(w, "if") -> parse_if(rest)
       kw?(w, "return") -> parse_return(rest)
       kw?(w, "var") -> parse_var(rest)
+      kw?(w, "for") -> parse_for(rest)
+      kw?(w, "while") -> parse_while(rest)
       true -> parse_expr_statement(tokens)
     end
   end
@@ -306,16 +315,112 @@ defmodule ExML.CFScript.Parser do
 
   @spec parse_expr_statement([Lexer.token()]) :: {tuple(), [Lexer.token()]}
   defp parse_expr_statement(tokens) do
-    {expr, tokens} = parse_expr(tokens)
+    {stmt, rest} = parse_simple_statement(tokens)
+    {stmt, drop_semicolon(rest)}
+  end
 
-    case tokens do
+  # An assignment, compound assignment (`+=`/`&=`/...), increment (`x++`/`x--`),
+  # or bare expression — without consuming a trailing `;`. Reused by for-loop
+  # init/increment clauses.
+  @compound_ops %{"+=" => "+", "-=" => "-", "*=" => "*", "/=" => "/", "&=" => "&"}
+  @spec parse_simple_statement([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_simple_statement(tokens) do
+    {target, rest} = parse_expr(tokens)
+
+    case rest do
       [{:op, "="} | rest] ->
         {rhs, rest} = parse_expr(rest)
-        {{:assign, expr, rhs}, drop_semicolon(rest)}
+        {{:assign, target, rhs}, rest}
+
+      [{:op, op} | rest] when is_map_key(@compound_ops, op) ->
+        {rhs, rest} = parse_expr(rest)
+        {{:assign, target, {:binop, Map.fetch!(@compound_ops, op), target, rhs}}, rest}
+
+      [{:op, op} | rest] when op in ["++", "--"] ->
+        {{:incr, target, String.first(op)}, rest}
 
       _ ->
-        {{:expr, expr}, drop_semicolon(tokens)}
+        {{:expr, target}, rest}
     end
+  end
+
+  # `for (...)` — either C-style (init; cond; incr) or for-in (item in coll).
+  @spec parse_for([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_for(tokens) do
+    tokens = expect_op(tokens, "(")
+
+    if for_in?(tokens) do
+      parse_for_in(tokens)
+    else
+      parse_for_c_style(tokens)
+    end
+  end
+
+  # for-in shape: `[var] ident in <expr>` — detect `in` before the first `;`.
+  @spec for_in?([Lexer.token()]) :: boolean()
+  defp for_in?(tokens) do
+    tokens
+    |> Enum.take_while(fn
+      {:op, ";"} -> false
+      {:op, ")"} -> false
+      _ -> true
+    end)
+    |> Enum.any?(fn {type, val} -> type == :ident and String.downcase(val) == "in" end)
+  end
+
+  @spec parse_for_in([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_for_in(tokens) do
+    tokens = drop_var(tokens)
+    {name, tokens} = take_ident(tokens)
+    tokens = expect_ident(tokens, "in")
+    {coll, tokens} = parse_expr(tokens)
+    tokens = expect_op(tokens, ")")
+    {body, tokens} = parse_block_or_statement(tokens)
+    {{:for_in, name, coll, body}, tokens}
+  end
+
+  @spec parse_for_c_style([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_for_c_style(tokens) do
+    {init, tokens} = parse_for_init(tokens)
+    tokens = expect_op(tokens, ";")
+    {cond_expr, tokens} = parse_expr(tokens)
+    tokens = expect_op(tokens, ";")
+    {incr, tokens} = parse_simple_statement(tokens)
+    tokens = expect_op(tokens, ")")
+    {body, tokens} = parse_block_or_statement(tokens)
+    {{:for, init, cond_expr, incr, body}, tokens}
+  end
+
+  # The init clause may be a `var` declaration or a simple statement.
+  @spec parse_for_init([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_for_init([{:ident, w} | rest] = tokens) do
+    if kw?(w, "var"), do: parse_var_no_semicolon(rest), else: parse_simple_statement(tokens)
+  end
+
+  defp parse_for_init(tokens), do: parse_simple_statement(tokens)
+
+  @spec parse_var_no_semicolon([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_var_no_semicolon(tokens) do
+    {name, tokens} = take_ident(tokens)
+    tokens = expect_op(tokens, "=")
+    {expr, tokens} = parse_expr(tokens)
+    {{:var, name, expr}, tokens}
+  end
+
+  @spec drop_var([Lexer.token()]) :: [Lexer.token()]
+  defp drop_var([{:ident, w} | rest]) do
+    if kw?(w, "var"), do: rest, else: [{:ident, w} | rest]
+  end
+
+  defp drop_var(tokens), do: tokens
+
+  @spec parse_while([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_while(tokens) do
+    tokens = expect_op(tokens, "(")
+    {cond_expr, tokens} = parse_expr(tokens)
+    tokens = expect_op(tokens, ")")
+    {body, tokens} = parse_block_or_statement(tokens)
+    {{:while, cond_expr, body}, tokens}
   end
 
   ## Expressions (precedence climbing)
@@ -541,9 +646,15 @@ defmodule ExML.CFScript.Parser do
   defp parse_primary([{:float, f} | rest]), do: {{:lit, f}, rest}
   defp parse_primary([{:string, s} | rest]), do: {{:lit, s}, rest}
 
-  defp parse_primary([{:op, "("} | rest]) do
-    {expr, rest} = parse_expr(rest)
-    {expr, expect_op(rest, ")")}
+  # `(params) => ...` arrow function, or a parenthesized expression.
+  defp parse_primary([{:op, "("} | _] = tokens) do
+    if arrow_ahead?(tokens) do
+      parse_arrow_with_params(tokens)
+    else
+      [_open | rest] = tokens
+      {expr, rest} = parse_expr(rest)
+      {expr, expect_op(rest, ")")}
+    end
   end
 
   # Array literal: [a, b, c]
@@ -565,6 +676,7 @@ defmodule ExML.CFScript.Parser do
       kw?(w, "null") -> {{:lit, nil}, rest}
       kw?(w, "new") -> parse_new(rest)
       kw?(w, "function") and match?([{:op, "("} | _], rest) -> parse_anon_function(rest)
+      match?([{:op, "=>"} | _], rest) -> parse_arrow_body([%AST.Param{name: w}], tl(rest))
       true -> {{:var, w}, tokens |> tl()}
     end
   end
@@ -602,6 +714,41 @@ defmodule ExML.CFScript.Parser do
     {body, tokens} = parse_statements(tokens, [])
     tokens = expect_op(tokens, "}")
     {{:fun, params, body}, tokens}
+  end
+
+  # Whether `( ... )` is immediately followed by `=>` (an arrow's param list)
+  # rather than being a parenthesized expression.
+  @spec arrow_ahead?([Lexer.token()]) :: boolean()
+  defp arrow_ahead?([{:op, "("} | rest]),
+    do: match?([{:op, "=>"} | _], skip_balanced_parens(rest, 1))
+
+  @spec skip_balanced_parens([Lexer.token()], non_neg_integer()) :: [Lexer.token()]
+  defp skip_balanced_parens(tokens, 0), do: tokens
+  defp skip_balanced_parens([], _depth), do: []
+  defp skip_balanced_parens([{:op, "("} | rest], depth), do: skip_balanced_parens(rest, depth + 1)
+  defp skip_balanced_parens([{:op, ")"} | rest], depth), do: skip_balanced_parens(rest, depth - 1)
+  defp skip_balanced_parens([_token | rest], depth), do: skip_balanced_parens(rest, depth)
+
+  # `(params) => expr_or_block`
+  @spec parse_arrow_with_params([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_arrow_with_params(tokens) do
+    tokens = expect_op(tokens, "(")
+    {params, tokens} = parse_params(tokens, [])
+    tokens = expect_op(tokens, ")")
+    tokens = expect_op(tokens, "=>")
+    parse_arrow_body(params, tokens)
+  end
+
+  # Arrow body: a `{ ... }` block, or a single expression (implicit return).
+  @spec parse_arrow_body([AST.Param.t()], [Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_arrow_body(params, [{:op, "{"} | rest]) do
+    {body, rest} = parse_statements(rest, [])
+    {{:fun, params, body}, expect_op(rest, "}")}
+  end
+
+  defp parse_arrow_body(params, tokens) do
+    {expr, rest} = parse_expr(tokens)
+    {{:fun, params, [{:return, expr}]}, rest}
   end
 
   ## Token utilities
