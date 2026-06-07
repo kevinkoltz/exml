@@ -18,6 +18,7 @@ defmodule ExML.CFScript.BIF.ListFns do
   @names ~w(
     listlen listfind listfindnocase listcontains listcontainsnocase
     listappend listprepend listtoarray listgetat listfirst listlast listrest
+    listsort
   )
 
   @impl true
@@ -65,6 +66,14 @@ defmodule ExML.CFScript.BIF.ListFns do
 
   def call("listrest", [list]), do: rest(list, @default_delimiter)
   def call("listrest", [list, delim]), do: rest(list, str(delim))
+
+  def call("listsort", [list, type]), do: sort(list, str(type), "asc", @default_delimiter)
+
+  def call("listsort", [list, type, order]),
+    do: sort(list, str(type), str(order), @default_delimiter)
+
+  def call("listsort", [list, type, order, delim]),
+    do: sort(list, str(type), str(order), str(delim))
 
   def call(name, args) do
     raise CFException, message: "#{name}() not supported for #{length(args)} argument(s)"
@@ -148,6 +157,23 @@ defmodule ExML.CFScript.BIF.ListFns do
       [_first | tail] -> Enum.join(tail, primary(delim))
     end
   end
+
+  # listSort: split, sort by type ("numeric" / "text" / "textnocase"), apply
+  # order ("asc"/"desc"), re-join on the primary delimiter.
+  @spec sort(any(), String.t(), String.t(), String.t()) :: String.t()
+  defp sort(list, type, order, delim) do
+    sorted = list |> elements(delim) |> Enum.sort(comparator(String.downcase(type)))
+
+    sorted =
+      if String.downcase(order) in ["desc", "descending"], do: Enum.reverse(sorted), else: sorted
+
+    Enum.join(sorted, primary(delim))
+  end
+
+  @spec comparator(String.t()) :: (String.t(), String.t() -> boolean())
+  defp comparator("numeric"), do: fn a, b -> Value.to_number(a) <= Value.to_number(b) end
+  defp comparator("textnocase"), do: fn a, b -> String.downcase(a) <= String.downcase(b) end
+  defp comparator(_text), do: fn a, b -> a <= b end
 
   @spec primary(String.t()) :: String.t()
   defp primary(delim), do: String.first(delim) || @default_delimiter

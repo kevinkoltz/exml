@@ -62,18 +62,44 @@ defmodule ExML.CFScript.LoaderTest do
              )
   end
 
-  test "a cffunction with an unconvertible tag body (cfloop) is dropped" do
+  test "converts a tag-bodied cffunction with a cfloop (from/to)" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("loops", function() {
+                   assert_equal(common.tag_loop_fn(), "123");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "converts a tag-bodied cffunction with a cfloop (list, scoped index)" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("loops a list", function() {
+                   assert_equal(common.tag_list_loop_fn("a,b,c"), "ABC");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "a cffunction with an unconvertible tag body (cfquery) is dropped" do
     summary =
       run("""
       describe("g", function() {
-        it("has no tag_loop_fn", function() {
-          common.tag_loop_fn();
+        it("has no tag_query_fn", function() {
+          common.tag_query_fn();
         });
       });
       """)
 
     assert summary.failed == 1
     assert [%{status: :fail, message: message}] = summary.results
-    assert message =~ "tag_loop_fn"
+    assert message =~ "tag_query_fn"
   end
 end

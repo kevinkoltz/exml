@@ -186,6 +186,7 @@ defmodule ExML.CFScript.Loader do
   @cfelseif_re Regex.compile!("<cfelseif\\b(#{@tag_content})>", "i")
   @cfswitch_re Regex.compile!("<cfswitch\\b(#{@tag_content})>", "i")
   @cfcase_re Regex.compile!("<cfcase\\b(#{@tag_content})>", "i")
+  @cfloop_re Regex.compile!("<cfloop\\b(#{@tag_content})>", "i")
 
   # Translate the tag statements we support into cfscript. Unsupported tags are
   # left intact so the caller can detect and drop the function.
@@ -201,7 +202,58 @@ defmodule ExML.CFScript.Loader do
     |> sub(@cfif_re, fn _whole, cond -> "if (#{cond}) {" end)
     |> strip_to(~r/<\/cfif\s*>/i, "}")
     |> convert_switch_tags()
+    |> convert_loop_tags()
   end
+
+  # <cfloop> in its two common forms; other forms (query/array/collection/
+  # condition) are left intact so the function is dropped.
+  #   from/to[/step] index  -> for (i = from; i <= to; i++) { ... }
+  #   list[/delimiters]     -> for (i in listToArray(list[, delims])) { ... }
+  @spec convert_loop_tags(String.t()) :: String.t()
+  defp convert_loop_tags(body) do
+    body
+    |> sub(@cfloop_re, fn _whole, attrs -> convert_cfloop_open(parse_attrs(attrs)) end)
+    |> strip_to(~r/<\/cfloop\s*>/i, "}")
+  end
+
+  @spec convert_cfloop_open(%{optional(String.t()) => String.t()}) :: String.t()
+  defp convert_cfloop_open(attrs) do
+    cond do
+      Map.has_key?(attrs, "from") and Map.has_key?(attrs, "to") ->
+        index = strip_hashes(Map.fetch!(attrs, "index"))
+        from = strip_hashes(Map.fetch!(attrs, "from"))
+        to = strip_hashes(Map.fetch!(attrs, "to"))
+
+        increment =
+          case Map.get(attrs, "step") do
+            nil -> "#{index}++"
+            step -> "#{index} += #{strip_hashes(step)}"
+          end
+
+        "for (#{index} = #{from}; #{index} <= #{to}; #{increment}) {"
+
+      Map.has_key?(attrs, "list") ->
+        # for-in binds a bare name, so drop any scope prefix on the index.
+        index = attrs |> Map.fetch!("index") |> strip_hashes() |> bare_name()
+        list = strip_hashes(Map.fetch!(attrs, "list"))
+
+        collection =
+          case Map.get(attrs, "delimiters") do
+            nil -> "listToArray(#{list})"
+            delims -> ~s|listToArray(#{list}, "#{delims}")|
+          end
+
+        "for (#{index} in #{collection}) {"
+
+      true ->
+        # Unsupported form: leave a tag marker so the function is dropped.
+        "<cfloop>"
+    end
+  end
+
+  # The last dotted segment of a (possibly scope-qualified) name: `local.n` -> `n`.
+  @spec bare_name(String.t()) :: String.t()
+  defp bare_name(name), do: name |> String.split(".") |> List.last()
 
   @spec convert_switch_tags(String.t()) :: String.t()
   defp convert_switch_tags(body) do

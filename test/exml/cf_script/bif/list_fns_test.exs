@@ -85,5 +85,11 @@ defmodule ExML.CFScript.BIF.ListFnsTest do
       assert R.call("listRest", ["a,b,c"]) == "b,c"
       assert R.call("listRest", ["a"]) == ""
     end
+
+    test "sort numeric / textnocase / order" do
+      assert R.call("listSort", ["10,2,1", "numeric"]) == "1,2,10"
+      assert R.call("listSort", ["b,A,c", "textnocase"]) == "A,b,c"
+      assert R.call("listSort", ["1,2,3", "numeric", "desc"]) == "3,2,1"
+    end
   end
 end

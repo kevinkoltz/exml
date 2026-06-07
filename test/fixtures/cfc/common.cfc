@@ -51,13 +51,29 @@ function multi_field_sort(required data, required array sort_fields) localmode=t
 	<cfreturn name>
 </cffunction>
 
-<!--- Unconvertible tag body (cfloop): must be dropped, not emitted broken. --->
+<!--- Tag-bodied function exercising cfloop (from/to) conversion. --->
 <cffunction name="tag_loop_fn" returntype="string">
 	<cfset var out = "">
 	<cfloop from="1" to="3" index="i">
 		<cfset out = out & i>
 	</cfloop>
 	<cfreturn out>
+</cffunction>
+
+<!--- Tag-bodied function exercising cfloop (list) conversion. --->
+<cffunction name="tag_list_loop_fn" returntype="string">
+	<cfargument name="items" required="true">
+	<cfset var out = "">
+	<cfloop list="#arguments.items#" index="local.item">
+		<cfset out = out & ucase(item)>
+	</cfloop>
+	<cfreturn out>
+</cffunction>
+
+<!--- Unconvertible tag body (cfquery): must be dropped, not emitted broken. --->
+<cffunction name="tag_query_fn" returntype="string">
+	<cfquery name="q">SELECT 1</cfquery>
+	<cfreturn "never">
 </cffunction>
 
 </cfcomponent>

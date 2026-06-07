@@ -159,4 +159,17 @@ defmodule ExML.CFScript.BIF.StringFnsTest do
       assert R.call("replace", [R.call("rjustify", ["5", 3]), " ", "0", "all"]) == "005"
     end
   end
+
+  describe "chr / asc" do
+    test "chr returns the character for a code point" do
+      assert R.call("chr", [65]) == "A"
+      assert R.call("chr", [10]) == "\n"
+    end
+
+    test "asc returns the code of the first character, 0 for empty" do
+      assert R.call("asc", ["A"]) == 65
+      assert R.call("asc", ["abc"]) == 97
+      assert R.call("asc", [""]) == 0
+    end
+  end
 end

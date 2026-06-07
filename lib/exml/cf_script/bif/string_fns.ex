@@ -15,7 +15,7 @@ defmodule ExML.CFScript.BIF.StringFns do
     len ucase lcase ucfirst left right mid trim ltrim rtrim
     find findnocase refind rematch reescape rereplace rereplacenocase replace
     replacenocase val valnumber reverse repeatstring
-    contains startswith endswith rjustify ljustify cjustify
+    contains startswith endswith rjustify ljustify cjustify chr asc
   )
 
   @impl true
@@ -195,6 +195,16 @@ defmodule ExML.CFScript.BIF.StringFns do
     total = max(width(len) - String.length(str), 0)
     left = div(total, 2)
     String.duplicate(" ", left) <> str <> String.duplicate(" ", total - left)
+  end
+
+  # chr/asc — code point <-> single character (Lucee Chr.java / Asc.java).
+  def call("chr", [n]), do: <<trunc(Value.to_number(n))::utf8>>
+
+  def call("asc", [s]) do
+    case Value.to_str(s) do
+      "" -> 0
+      <<first::utf8, _rest::binary>> -> first
+    end
   end
 
   def call("reverse", [v]), do: String.reverse(Value.to_str(v))
