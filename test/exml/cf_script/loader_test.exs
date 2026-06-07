@@ -104,20 +104,60 @@ defmodule ExML.CFScript.LoaderTest do
              )
   end
 
-  test "a cffunction with an unconvertible tag body (cffile) is dropped" do
+  test "converts a tag-bodied cffunction with a cfloop (collection over a struct)" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("loops struct keys", function() {
+                   assert_equal(common.tag_collection_fn({a: 1, b: 2, c: 3}), 3);
+                 });
+               });
+               """)
+             )
+  end
+
+  test "an unsupported tag (cffile) loads as a per-statement marker that names the tag" do
     summary =
       run("""
       describe("g", function() {
-        it("has no tag_file_fn", function() {
+        it("raises at the cffile line", function() {
           common.tag_file_fn();
         });
       });
       """)
 
     assert summary.failed == 1
-    # A missing function is an unexpected runtime fault, not an assertion failure.
-    assert [%{status: :error, message: message}] = summary.results
-    assert message =~ "tag_file_fn"
+    assert [%{status: :error, type: "exml.unsupported", message: message}] = summary.results
+    assert message =~ "unsupported CFML tag cffile"
+  end
+
+  test "createObject instantiates a component" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("createObject component", function() {
+                   t = createObject("component", "cfc.pkg.thing");
+                   assert_equal(t.read_label(), "thing");
+                 });
+               });
+               """)
+             )
+  end
+
+  test "top-level <cfobject> creates the instance during the pseudo-constructor" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 ou = new cfc.objuser();
+                 it("cfobject helper is usable", function() {
+                   assert_equal(ou.helper_label(), "thing");
+                 });
+               });
+               """)
+             )
   end
 
   test "top-level (pseudo-constructor) statements run on instantiation" do

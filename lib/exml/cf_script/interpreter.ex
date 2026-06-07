@@ -629,6 +629,9 @@ defmodule ExML.CFScript.Interpreter do
       down == "queryexecute" ->
         exec_query(pos, env)
 
+      down == "createobject" ->
+        create_object(pos, env)
+
       # Marker emitted by the tag converter for a tag/attribute it can't support.
       down == "__exml_unsupported" ->
         raise CFException,
@@ -661,6 +664,27 @@ defmodule ExML.CFScript.Interpreter do
       cf_type: Value.to_str(type),
       message: Value.to_str(message),
       detail: Value.to_str(detail)
+  end
+
+  # createObject("component", "cfc.x") / createObject("cfc.x") -> instantiate the
+  # component. Other object types (java/com/...) aren't modelled.
+  @spec create_object([any()], Env.t()) :: Instance.t()
+  defp create_object(pos, env) do
+    case Enum.map(pos, &Value.to_str/1) do
+      ["component", path] ->
+        instantiate_path(path, [], %{}, env)
+
+      [path] ->
+        instantiate_path(path, [], %{}, env)
+
+      [type | _] ->
+        raise CFException,
+          cf_type: "exml.unsupported",
+          message: "createObject(\"#{type}\", ...) is unsupported"
+
+      _ ->
+        raise CFException, message: "createObject requires a component path"
+    end
   end
 
   # A function defined on the currently-executing component (sibling method).

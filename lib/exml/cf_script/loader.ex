@@ -126,11 +126,18 @@ defmodule ExML.CFScript.Loader do
   @spec preprocess(String.t()) :: String.t()
   defp preprocess(source) do
     source
-    # Blank (don't delete) multi-line comments so line numbers don't shift.
+    # Blank (don't delete) CFML `<!--- --->` and HTML `<!-- -->` comments so line
+    # numbers don't shift. CFML comments first (they contain `<!--`).
     |> blank(~r/<!---.*?--->/s)
+    |> blank(~r/<!--.*?-->/s)
     |> TagConverter.convert_cffunctions()
     |> strip(~r/<\/?cfcomponent\b[^>]*>/i)
     |> strip(~r/<\/?cfscript\s*>/i)
+    # Convert component-level (pseudo-constructor) tags too — `<cfobject>`,
+    # `<cfset>`, ... written directly in the body, outside any function. The
+    # already-converted function bodies have no tags left, so this only touches
+    # the top level.
+    |> TagConverter.convert_body()
   end
 
   @spec strip(String.t(), Regex.t()) :: String.t()

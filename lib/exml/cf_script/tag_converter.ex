@@ -62,6 +62,14 @@ defmodule ExML.CFScript.TagConverter do
   @cfinvokearg_re Regex.compile!("<cfinvokeargument\\b(#{@tag_content})\\s*/?>", "i")
   @cfargument_re Regex.compile!("<cfargument\\b(#{@tag_content})>", "i")
   @cffunction_re Regex.compile!("<cffunction\\b(#{@tag_content})>(.*?)</cffunction>", "is")
+  @cfobject_re Regex.compile!("<cfobject\\b(#{@tag_content})\\s*/?>", "i")
+
+  # Any CFML tag the conversions above didn't handle (cfmodule, cffile, cfhttp,
+  # cfthread, cfobject, ...). The open tag becomes a marker that raises if
+  # reached; the close tag is blanked. Per statement, so the rest of the
+  # function still loads and runs.
+  @unsupported_open Regex.compile!("<cf(\\w+)\\b(#{@tag_content})/?>", "i")
+  @unsupported_close Regex.compile!("</cf\\w+\\s*>", "i")
 
   # Attributes with no runtime effect for us — always allowed (ignored).
   @cosmetic ~w(hint output access displayname description)
@@ -255,6 +263,7 @@ defmodule ExML.CFScript.TagConverter do
     |> strip(~r/<\/cffinally\s*>/i)
     |> strip_to(~r/<\/cftry\s*>/i, "}")
     # Statement tags
+    |> sub(@cfobject_re, fn _whole, attrs -> convert_cfobject(attrs) end)
     |> sub(@cfthrow_re, fn _whole, attrs -> convert_cfthrow(attrs) end)
     |> sub(@cfparam_re, fn _whole, attrs -> convert_cfparam(attrs) end)
     |> strip_to(~r/<cfrethrow\s*\/?>/i, "throw(message = cfcatch.message, type = cfcatch.type);")
@@ -270,6 +279,19 @@ defmodule ExML.CFScript.TagConverter do
     |> strip_to(~r/<\/cfif\s*>/i, "}")
     |> convert_switch_tags()
     |> convert_loop_tags()
+    |> markerize_unsupported_tags()
+  end
+
+  # Replace any leftover (unsupported) CFML tag with a per-statement marker, so a
+  # function using e.g. `<cfmodule>` or `<cffile>` still loads and only raises at
+  # that line if reached.
+  @spec markerize_unsupported_tags(String.t()) :: String.t()
+  defp markerize_unsupported_tags(body) do
+    body
+    |> sub(@unsupported_open, fn whole, tag, _attrs ->
+      pad_to(~s|__exml_unsupported("unsupported CFML tag cf#{String.downcase(tag)}");|, whole)
+    end)
+    |> blank(@unsupported_close)
   end
 
   ## <cfquery> -> queryExecute
@@ -426,6 +448,26 @@ defmodule ExML.CFScript.TagConverter do
     Enum.join(collection ++ children, ", ")
   end
 
+  ## <cfobject> -> new
+
+  # `<cfobject component="X" name="n">` instantiates a component into `n`. Other
+  # object types (java/com/...) aren't modelled, so they become a marker.
+  @spec convert_cfobject(String.t()) :: String.t()
+  defp convert_cfobject(attrs_str) do
+    attrs = attrs_map(attrs_str)
+    type = (Map.get(attrs, "type") || "component") |> String.downcase()
+    component = Map.get(attrs, "component")
+    name = Map.get(attrs, "name")
+
+    cond do
+      type == "component" and is_binary(component) and is_binary(name) ->
+        "#{name} = new #{component}();"
+
+      true ->
+        unsupported_stmt("cfobject", "type=#{type}")
+    end
+  end
+
   ## <cfthrow> / <cfparam>
 
   @spec convert_cfthrow(String.t()) :: String.t()
@@ -534,10 +576,21 @@ defmodule ExML.CFScript.TagConverter do
 
         "for (#{index} in #{strip_hashes(Map.fetch!(attrs, "array"))}) {"
 
+      # `collection` iterates a struct's keys.
+      Map.has_key?(attrs, "collection") ->
+        index =
+          (Map.get(attrs, "item") || Map.get(attrs, "index")) |> strip_hashes() |> bare_name()
+
+        "for (#{index} in #{strip_hashes(Map.fetch!(attrs, "collection"))}) {"
+
+      # `condition` is a plain while loop.
+      Map.has_key?(attrs, "condition") ->
+        "while (#{strip_hashes(Map.fetch!(attrs, "condition"))}) {"
+
       true ->
-        # Unsupported form (query/collection/condition/times): a marker that
-        # raises if reached, plus a dead `while (false)` so the `</cfloop>` -> `}`
-        # stays balanced and the rest of the function still loads.
+        # Unsupported form (e.g. `query=` with its current-row semantics): a
+        # marker that raises if reached, plus a dead `while (false)` so the
+        # `</cfloop>` -> `}` stays balanced and the rest of the function loads.
         ~s|__exml_unsupported("unsupported cfloop form"); while (false) {|
     end
   end

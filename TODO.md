@@ -12,8 +12,8 @@ by area and roughly ordered by impact within each group.
 - [x] **Inline param annotations** — `function f(numeric x hint="...")`. Trailing
   `key="value"` annotations after a parameter are parsed and ignored, so the
   function loads (type vs name is disambiguated by a type-keyword set).
-- [ ] **`<!--` / HTML comments inside cfscript bodies** — currently lexes as
-  `< ! --` and drops the function.
+- [x] **`<!--` / HTML comments** — blanked (line-neutral) alongside CFML
+  `<!--- --->` comments.
 - [x] **Top-level bare variable assignments** (pseudo-constructor) — `x = 5`,
   `x = {}`, `this.x = ...` directly in the component body now collect into
   `Component.init` and run per instance into the `variables` scope (before
@@ -30,13 +30,26 @@ actually *implement* these rather than mark them:
   currently tolerate standard-but-unimplemented attributes (e.g. `<cfquery
   result=>`, `maxrows=`). Tighten to the genuinely-handled set once those are
   implemented, so the markers point only at real gaps.
-- [ ] **`<cfmodule>`** — custom-tag invocation (blocks e.g. `wo_events.event_handler`).
-- [ ] **Remaining `<cfloop>` forms** — `query=`, `collection=`, `condition=`,
-  `times=` (only `from/to`, `list`, and `array` are converted today).
-- [ ] **Side-effect / IO tags** — `<cffile>`, `<cfhttp>`+`<cfhttpparam>`,
-  `<cfthread>`, `<cfobject>`, `<cfftp>`, `<cfdocument>`, `<cfwddx>`,
-  `<cfcontent>`, `<cfheader>`, `<cflock>`. Convert to stubs (line-neutral) so
-  functions using them still load.
+- [x] **`<cfloop>` `collection=`/`condition=`** — converted (for-in over a
+  struct / a while loop). `query=` keeps its current-row semantics so it stays a
+  marker; `times=` still a marker.
+- [x] **`<cfobject>` + `createObject(...)`** — instantiate a component
+  (`name = new X()`); other object types (java/com) are markers.
+- [x] **Top-level (pseudo-constructor) tags** — component-body tags outside any
+  function are now converted too (e.g. `<cfobject>`/`<cfset>` memoization).
+- [x] **Side-effect / IO tags & `<cfmodule>`** — `<cffile>`, `<cfhttp>`,
+  `<cfthread>`, `<cfftp>`, `<cfmodule>` (custom tags), ... become per-statement
+  `exml.unsupported` markers, so the function loads and only the IO line raises.
+  Genuinely *running* these (filesystem/network/custom-tag templates) is out of
+  scope for the interpreter.
+- [ ] **`cfc.x = createObject(...)` namespace-cache pattern** — assigning onto
+  the `cfc` path namespace (a memoization idiom, e.g. in `wo_events`) fails with
+  "Cannot assign member on [namespace]". `cfc` is the component-path resolver,
+  not a writable scope. Blocks `wo_events.event_handler` (route_events spec).
+- [ ] **Stricter attribute-implementation flagging** — the per-tag allowed sets
+  currently tolerate standard-but-unimplemented attributes (e.g. `<cfquery
+  result=>`, `maxrows=`). Tighten to the genuinely-handled set once those are
+  implemented, so the markers point only at real gaps.
 
 ## Diagnostics & tooling
 

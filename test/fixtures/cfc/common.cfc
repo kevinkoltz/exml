@@ -84,7 +84,17 @@ function multi_field_sort(required data, required array sort_fields) localmode=t
 	</cftry>
 </cffunction>
 
-<!--- Unconvertible tag body (cffile): must be dropped, not emitted broken. --->
+<!--- Tag-bodied function exercising cfloop (collection) conversion. --->
+<cffunction name="tag_collection_fn" returntype="numeric">
+	<cfargument name="data" required="true">
+	<cfset var n = 0>
+	<cfloop collection="#arguments.data#" item="k">
+		<cfset n = n + 1>
+	</cfloop>
+	<cfreturn n>
+</cffunction>
+
+<!--- Unsupported tag (cffile): loads as a per-statement marker, not dropped. --->
 <cffunction name="tag_file_fn" returntype="string">
 	<cffile action="read" file="/tmp/x" variable="out">
 	<cfreturn out>

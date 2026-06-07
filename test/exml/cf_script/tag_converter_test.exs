@@ -99,6 +99,23 @@ defmodule ExML.CFScript.TagConverterTest do
       assert TagConverter.convert_body("<cfabort>") =~ "throw(message = \"cfabort\");"
       assert TagConverter.convert_body("<cfrethrow>") =~ "throw(message = cfcatch.message"
     end
+
+    test "cfloop collection -> for-in over struct keys" do
+      out =
+        TagConverter.convert_body(~s|<cfloop collection="#m#" item="k"><cfset n &= k></cfloop>|)
+
+      assert out =~ "for (k in m) {"
+    end
+
+    test "cfloop condition -> while" do
+      out = TagConverter.convert_body(~s|<cfloop condition="i lt 3"><cfset i++></cfloop>|)
+      assert out =~ "while (i lt 3) {"
+    end
+
+    test "an unsupported tag becomes a per-statement marker" do
+      assert TagConverter.convert_body(~s|<cfmodule name="stopwatch" label="x">|) =~
+               ~s|__exml_unsupported("unsupported CFML tag cfmodule");|
+    end
   end
 
   describe "convert_cffunctions (attribute forms)" do
