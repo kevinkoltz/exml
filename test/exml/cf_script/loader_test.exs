@@ -119,4 +119,20 @@ defmodule ExML.CFScript.LoaderTest do
     assert [%{status: :error, message: message}] = summary.results
     assert message =~ "tag_file_fn"
   end
+
+  test "top-level `name = function(){}` loads as a callable method" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 fx = new cfc.fnexpr();
+                 it("method expressions are callable, incl. sibling calls", function() {
+                   assert_equal(fx.double(5), 10);
+                   assert_equal(fx.triple(5), 15);
+                   assert_equal(fx.sextuple(5), 25);
+                 });
+               });
+               """)
+             )
+  end
 end

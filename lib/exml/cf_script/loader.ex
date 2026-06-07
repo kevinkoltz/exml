@@ -264,13 +264,33 @@ defmodule ExML.CFScript.Loader do
         collect_member(rest, [tok | leading])
 
       true ->
-        # Unexpected top-level ident (e.g. a `property` statement); drop the
-        # accumulated leading tokens and skip this one token to resync.
-        collect_member(rest, [])
+        member_after_ident(tok, rest)
     end
   end
 
   defp collect_member([_other | rest], _leading), do: collect_member(rest, [])
+
+  # `name = function(...) {...}` at the top level is a method defined as a
+  # function expression — rewrite it to a named declaration (`function name(...)
+  # {...}`) so it loads like any other method. Anything else (`property`, a bare
+  # variable assignment) is skipped to resync.
+  @spec member_after_ident(Lexer.token(), [Lexer.token()]) ::
+          {:function, [Lexer.token()], [Lexer.token()]}
+          | {:static_init, [Lexer.token()], [Lexer.token()]}
+          | :done
+  defp member_after_ident(
+         name_tok,
+         [{:op, "=", _}, {:ident, fw, _} = fn_tok, {:op, "(", _} = paren | rest]
+       ) do
+    if String.downcase(fw) == "function" do
+      {body_tokens, after_body} = take_function_body([fn_tok, paren | rest], [])
+      {:function, [fn_tok, name_tok | tl(body_tokens)], after_body}
+    else
+      collect_member(rest, [])
+    end
+  end
+
+  defp member_after_ident(_name_tok, rest), do: collect_member(rest, [])
 
   @spec static_only?([Lexer.token()]) :: boolean()
   defp static_only?([{:ident, word, _}]), do: String.downcase(word) == "static"

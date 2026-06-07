@@ -14,6 +14,10 @@ by area and roughly ordered by impact within each group.
   function loads (type vs name is disambiguated by a type-keyword set).
 - [ ] **`<!--` / HTML comments inside cfscript bodies** — currently lexes as
   `< ! --` and drops the function.
+- [ ] **Top-level bare variable assignments** (pseudo-constructor) — `x = 5` /
+  `x = {}` directly in the component body are still skipped (only
+  `name = function(){}` method expressions are recognized). Run them on
+  instantiation into the `variables` scope if needed.
 
 ## Tag conversion coverage (`tag_converter.ex`)
 
