@@ -39,11 +39,14 @@ don't sink a component.
 ### Language features
 
 Components and function declarations (incl. `static`, return types,
-`localmode`), `if`/`else`, `return`, `var`, assignments, the full operator set
+`localmode`), `if`/`else`, `return`, `var`, `for`/`for-in`/`while`,
+`try`/`catch`/`finally` + `throw`, assignments, the full operator set
 (`&`, comparisons, `and`/`or`/`not`, arithmetic), member access (`a.b`), static
 calls (`cfc.x::y()`), instance/method dispatch, `new`, array literals `[…]`,
-struct literals `{k: v}`, anonymous-function closures, and member functions on
-strings/arrays/structs (`s.trim()`, `a.map(fn)`, `s.keyExists(k)`).
+struct literals `{k: v}`, anonymous-function closures, arrow functions,
+positional and **named** arguments (`fn(x = 1)`), string interpolation, and
+member functions on strings/arrays/structs (`s.trim()`, `a.map(fn)`,
+`s.keyExists(k)`).
 
 ### Built-in functions
 

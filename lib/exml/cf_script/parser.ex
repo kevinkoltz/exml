@@ -252,6 +252,7 @@ defmodule ExML.CFScript.Parser do
       kw?(w, "var") -> parse_var(rest)
       kw?(w, "for") -> parse_for(rest)
       kw?(w, "while") -> parse_while(rest)
+      kw?(w, "try") -> parse_try(rest)
       true -> parse_expr_statement(tokens)
     end
   end
@@ -423,6 +424,63 @@ defmodule ExML.CFScript.Parser do
     {{:while, cond_expr, body}, tokens}
   end
 
+  # try { ... } catch (Type e) { ... } ... [finally { ... }]
+  @spec parse_try([Lexer.token()]) :: {tuple(), [Lexer.token()]}
+  defp parse_try(tokens) do
+    tokens = expect_op(tokens, "{")
+    {body, tokens} = parse_statements(tokens, [])
+    tokens = expect_op(tokens, "}")
+    {catches, tokens} = parse_catches(tokens, [])
+    {finally, tokens} = parse_finally(tokens)
+    {{:try, body, catches, finally}, tokens}
+  end
+
+  @spec parse_catches([Lexer.token()], [tuple()]) :: {[tuple()], [Lexer.token()]}
+  defp parse_catches([{:ident, w} | rest] = tokens, acc) do
+    if kw?(w, "catch") do
+      rest = expect_op(rest, "(")
+      {type, var, rest} = parse_catch_header(rest)
+      rest = expect_op(rest, ")")
+      rest = expect_op(rest, "{")
+      {body, rest} = parse_statements(rest, [])
+      rest = expect_op(rest, "}")
+      parse_catches(rest, [{type, var, body} | acc])
+    else
+      {Enum.reverse(acc), tokens}
+    end
+  end
+
+  defp parse_catches(tokens, acc), do: {Enum.reverse(acc), tokens}
+
+  # `(Type var)` or `(var)` (type defaults to "any"). Type may be dotted.
+  @spec parse_catch_header([Lexer.token()]) :: {String.t(), String.t(), [Lexer.token()]}
+  defp parse_catch_header(tokens) do
+    {parts, rest} = read_catch_parts(tokens, [])
+
+    case parts do
+      [var] -> {"any", var, rest}
+      parts -> {parts |> Enum.drop(-1) |> Enum.join("."), List.last(parts), rest}
+    end
+  end
+
+  defp read_catch_parts([{:op, ")"} | _] = tokens, acc), do: {Enum.reverse(acc), tokens}
+  defp read_catch_parts([{:ident, w} | rest], acc), do: read_catch_parts(rest, [w | acc])
+  defp read_catch_parts([{:string, s} | rest], acc), do: read_catch_parts(rest, [s | acc])
+  defp read_catch_parts([{:op, "."} | rest], acc), do: read_catch_parts(rest, acc)
+
+  @spec parse_finally([Lexer.token()]) :: {[tuple()], [Lexer.token()]}
+  defp parse_finally([{:ident, w} | rest]) do
+    if kw?(w, "finally") do
+      rest = expect_op(rest, "{")
+      {body, rest} = parse_statements(rest, [])
+      {body, expect_op(rest, "}")}
+    else
+      {[], [{:ident, w} | rest]}
+    end
+  end
+
+  defp parse_finally(tokens), do: {[], tokens}
+
   ## Expressions (precedence climbing)
 
   @spec parse_expr([Lexer.token()]) :: {tuple(), [Lexer.token()]}
@@ -573,10 +631,12 @@ defmodule ExML.CFScript.Parser do
     end
   end
 
-  # Supports named arguments (`name = expr` / `name : expr`); the slice only
-  # needs them swallowed, so we keep the value and drop the label.
-  defp parse_argument([{:ident, _name}, {:op, op} | rest]) when op in ["=", ":"],
-    do: parse_expr(rest)
+  # A named argument (`name = expr` / `name : expr`) becomes `{:named, name,
+  # expr}`; otherwise a positional expression.
+  defp parse_argument([{:ident, name}, {:op, op} | rest]) when op in ["=", ":"] do
+    {expr, rest} = parse_expr(rest)
+    {{:named, name, expr}, rest}
+  end
 
   defp parse_argument(tokens), do: parse_expr(tokens)
 

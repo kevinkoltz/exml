@@ -88,7 +88,8 @@ defmodule ExML.CFScript.Runner do
       "assert_not_equal" => native("assert_not_equal", &assert_not_equal/2),
       "assert_true" => native("assert_true", &assert_true/2),
       "assert_false" => native("assert_false", &assert_false/2),
-      "assert_match" => native("assert_match", &assert_match/2)
+      "assert_match" => native("assert_match", &assert_match/2),
+      "assert_throws" => native("assert_throws", &assert_throws/2)
     }
   end
 
@@ -189,6 +190,55 @@ defmodule ExML.CFScript.Runner do
     end
 
     nil
+  end
+
+  # assert_throws(callback [, expected_type [, expected_message]]): runs the
+  # callback, requires it to throw, and (optionally) checks the exception type
+  # and that its message contains expected_message.
+  defp assert_throws([callback | rest], env) do
+    expected_type = Value.to_str(Enum.at(rest, 0, ""))
+    expected_message = Value.to_str(Enum.at(rest, 1, ""))
+
+    case run_callback(callback, env) do
+      :no_throw ->
+        raise CFException,
+          cf_type: "AssertionError",
+          message: "Expected an exception but none was thrown"
+
+      {:threw, type, message} ->
+        check_throw_type(expected_type, type)
+        check_throw_message(expected_message, message)
+        nil
+    end
+  end
+
+  @spec run_callback(any(), term()) :: :no_throw | {:threw, String.t(), String.t()}
+  defp run_callback(callback, env) do
+    Interpreter.invoke(callback, [], env)
+    :no_throw
+  rescue
+    e in CFException -> {:threw, e.cf_type, e.message}
+    e -> {:threw, "Application", Exception.message(e)}
+  end
+
+  defp check_throw_type("", _type), do: :ok
+
+  defp check_throw_type(expected, type) do
+    if String.downcase(type) != String.downcase(expected) do
+      raise CFException,
+        cf_type: "AssertionError",
+        message: "Expected exception of type #{expected} but got #{type}"
+    end
+  end
+
+  defp check_throw_message("", _message), do: :ok
+
+  defp check_throw_message(expected, message) do
+    unless String.contains?(message, expected) do
+      raise CFException,
+        cf_type: "AssertionError",
+        message: "Expected exception message containing '#{expected}' but got '#{message}'"
+    end
   end
 
   @spec suffix([any()]) :: String.t()

@@ -7,7 +7,7 @@ defmodule ExML.CFScript.CFException do
   by the test harness.
   """
 
-  defexception [:message, cf_type: "Application"]
+  defexception [:message, cf_type: "Application", detail: ""]
 
-  @type t :: %__MODULE__{message: String.t(), cf_type: String.t()}
+  @type t :: %__MODULE__{message: String.t(), cf_type: String.t(), detail: String.t()}
 end

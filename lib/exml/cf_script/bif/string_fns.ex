@@ -15,6 +15,7 @@ defmodule ExML.CFScript.BIF.StringFns do
     len ucase lcase ucfirst left right mid trim ltrim rtrim
     find findnocase refind rematch reescape rereplace rereplacenocase replace
     replacenocase val valnumber reverse repeatstring
+    contains startswith endswith
   )
 
   @impl true
@@ -177,6 +178,13 @@ defmodule ExML.CFScript.BIF.StringFns do
     do: literal_replace_nocase(s, from, to, Value.to_str(scope))
 
   ## Misc
+
+  def call("contains", [s, sub]), do: String.contains?(Value.to_str(s), Value.to_str(sub))
+
+  def call("startswith", [s, prefix]),
+    do: String.starts_with?(Value.to_str(s), Value.to_str(prefix))
+
+  def call("endswith", [s, suffix]), do: String.ends_with?(Value.to_str(s), Value.to_str(suffix))
 
   def call("reverse", [v]), do: String.reverse(Value.to_str(v))
 

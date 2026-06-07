@@ -43,22 +43,32 @@ defmodule ExML.CFScript.Interpreter do
   @doc "Instantiate a parsed component, returning an `Instance` with a fresh variables scope."
   @spec instantiate(AST.Component.t(), String.t(), Context.t()) :: Instance.t()
   def instantiate(%AST.Component{} = component, type_path, %Context{} = ctx) do
-    variables = Scope.new()
-    instance = %Instance{type_path: type_path, component: component, variables: variables}
+    instance = new_instance(component, type_path)
 
-    # Run an `init` constructor if the component defines one (no args for the slice).
+    # Run a zero-arg `init` constructor if the component defines one.
     if function_named(component, "init") do
-      _ = call_instance_method(instance, "init", [], ctx)
+      _ = invoke_method(instance, "init", [], %{}, ctx)
     end
 
     instance
   end
 
+  @spec new_instance(AST.Component.t(), String.t()) :: Instance.t()
+  defp new_instance(component, type_path) do
+    %Instance{type_path: type_path, component: component, variables: Scope.new()}
+  end
+
   @doc "Invoke a method on an instance by name, returning its result."
   @spec call_instance_method(Instance.t(), String.t(), [any()], Context.t()) :: any()
-  def call_instance_method(%Instance{component: component} = instance, name, args, ctx) do
+  def call_instance_method(%Instance{} = instance, name, args, ctx) do
+    invoke_method(instance, name, args, %{}, ctx)
+  end
+
+  # Instance method call with positional + named arguments.
+  @spec invoke_method(Instance.t(), String.t(), [any()], map(), Context.t()) :: any()
+  defp invoke_method(%Instance{component: component} = instance, name, pos, named, ctx) do
     func = function_named!(component, name, instance.type_path)
-    call_function(func, args, instance, instance.type_path, component, ctx)
+    call_function(func, pos, named, instance, instance.type_path, component, ctx)
   end
 
   @doc "Invoke a closure or native function value with already-evaluated arguments."
@@ -154,6 +164,19 @@ defmodule ExML.CFScript.Interpreter do
     end)
   end
 
+  # try { } catch (Type e) { } ... [finally { }]. `return`/loop control unwind
+  # via throw, which `rescue` ignores (so they propagate) while `after` still
+  # runs the finally block.
+  defp eval_stmt({:try, body, catches, finally}, env) do
+    try do
+      Enum.each(body, &eval_stmt(&1, env))
+    rescue
+      error -> handle_catch(error, catches, env, __STACKTRACE__)
+    after
+      Enum.each(finally, &eval_stmt(&1, env))
+    end
+  end
+
   # Loop guard: a generous cap so a buggy condition can't hang the interpreter.
   @max_iterations 5_000_000
   @spec loop_while((-> boolean()), (-> any())) :: :ok
@@ -171,6 +194,49 @@ defmodule ExML.CFScript.Interpreter do
     else
       :ok
     end
+  end
+
+  # Match a raised exception against the catch clauses; run the first whose type
+  # matches (binding the exception struct to its variable), else re-raise.
+  @spec handle_catch(Exception.t(), [tuple()], Env.t(), Exception.stacktrace()) :: any()
+  defp handle_catch(error, catches, env, stacktrace) do
+    ex = exception_struct(error)
+
+    case Enum.find(catches, fn {type, _var, _body} -> catch_matches?(type, ex["type"]) end) do
+      {_type, var, body} ->
+        Scope.put(env.local, var, Heap.new_struct(ex))
+        Enum.each(body, &eval_stmt(&1, env))
+
+      nil ->
+        reraise(error, stacktrace)
+    end
+  end
+
+  @spec catch_matches?(String.t(), String.t()) :: boolean()
+  defp catch_matches?(catch_type, ex_type) do
+    down = String.downcase(catch_type)
+    down in ["any", ""] or down == String.downcase(ex_type)
+  end
+
+  # Build the CFML cfcatch struct from a raised exception.
+  @spec exception_struct(Exception.t()) :: map()
+  defp exception_struct(%CFException{message: msg, cf_type: type, detail: detail}) do
+    base_exception(type, msg, detail)
+  end
+
+  defp exception_struct(error) do
+    base_exception("Application", Exception.message(error), "")
+  end
+
+  defp base_exception(type, message, detail) do
+    %{
+      "type" => to_string(type),
+      "message" => to_string(message),
+      "detail" => to_string(detail),
+      "errorcode" => "",
+      "extendedinfo" => "",
+      "stacktrace" => ""
+    }
   end
 
   # What `for (x in coll)` iterates: array values, struct keys, or list elements.
@@ -270,7 +336,8 @@ defmodule ExML.CFScript.Interpreter do
   end
 
   defp eval({:new, path, args}, env) do
-    instantiate_path(path, eval_args(args, env), env)
+    {pos, named} = eval_args(args, env)
+    instantiate_path(path, pos, named, env)
   end
 
   # Array/struct literals create fresh mutable references (reference types).
@@ -334,62 +401,87 @@ defmodule ExML.CFScript.Interpreter do
   @spec eval_call(tuple(), [tuple()], Env.t()) :: any()
   # Static method: cfc.foo::method(args)
   defp eval_call({:static_member, obj_ast, name}, args, env) do
+    {pos, named} = eval_args(args, env)
     %ComponentType{component: component, path: path} = resolve_component_type(obj_ast, env)
     func = function_named!(component, name, path)
-    call_function(func, eval_args(args, env), nil, path, component, env.ctx)
+    call_function(func, pos, named, nil, path, component, env.ctx)
   end
 
   # Member call: obj.method(args) — instance method or string member function.
   defp eval_call({:member, {:var, scope_kw}, name}, args, env) when scope_kw in @scopes do
-    dispatch_member_call(read_scope_value(scope_kw, env), name, eval_args(args, env), env)
+    {pos, named} = eval_args(args, env)
+    dispatch_member_call(read_scope_value(scope_kw, env), name, pos, named, env)
   end
 
   defp eval_call({:member, obj_ast, name}, args, env) do
-    dispatch_member_call(eval(obj_ast, env), name, eval_args(args, env), env)
+    {pos, named} = eval_args(args, env)
+    dispatch_member_call(eval(obj_ast, env), name, pos, named, env)
   end
 
   # Bare call: name(args)
-  defp eval_call({:var, name}, args, env), do: call_named(name, eval_args(args, env), env)
-
-  # Any other callee expression must evaluate to a callable.
-  defp eval_call(callee_ast, args, env) do
-    invoke(eval(callee_ast, env), eval_args(args, env), env)
+  defp eval_call({:var, name}, args, env) do
+    {pos, named} = eval_args(args, env)
+    call_named(name, pos, named, env)
   end
 
-  @spec dispatch_member_call(any(), String.t(), [any()], Env.t()) :: any()
-  defp dispatch_member_call(%Instance{} = inst, name, args, env) do
-    call_instance_method(inst, name, args, env.ctx)
+  # Any other callee expression must evaluate to a callable (positional only).
+  defp eval_call(callee_ast, args, env) do
+    {pos, _named} = eval_args(args, env)
+    invoke(eval(callee_ast, env), pos, env)
+  end
+
+  @spec dispatch_member_call(any(), String.t(), [any()], map(), Env.t()) :: any()
+  defp dispatch_member_call(%Instance{} = inst, name, pos, named, env) do
+    invoke_method(inst, name, pos, named, env.ctx)
   end
 
   # Strings, arrays, and structs delegate to the member->BIF/HigherOrder glue,
-  # supplying an invoker so callback members can run UDFs.
-  defp dispatch_member_call(value, name, args, env) do
-    Collections.member_call(value, name, args, invoker(env))
+  # supplying an invoker so callback members can run UDFs (positional only).
+  defp dispatch_member_call(value, name, pos, _named, env) do
+    Collections.member_call(value, name, pos, invoker(env))
   end
 
-  # Resolve a bare call name: a callable variable, then a `this` method, then an
-  # injected native, then a built-in function.
-  @spec call_named(String.t(), [any()], Env.t()) :: any()
-  defp call_named(name, args, env) do
+  # Resolve a bare call name: a callable variable, then a sibling method, then an
+  # injected native, then `throw`/`queryExecute`, then a built-in function.
+  @spec call_named(String.t(), [any()], map(), Env.t()) :: any()
+  defp call_named(name, pos, named, env) do
+    down = String.downcase(name)
+
     cond do
       (callable = callable_var(name, env)) != :none ->
-        invoke(callable, args, env)
+        invoke(callable, pos, env)
 
       sibling_function(env, name) != nil ->
-        call_sibling(sibling_function(env, name), name, args, env)
+        call_sibling(sibling_function(env, name), name, pos, named, env)
 
-      Map.has_key?(env.ctx.natives, String.downcase(name)) ->
-        invoke(Map.fetch!(env.ctx.natives, String.downcase(name)), args, env)
+      Map.has_key?(env.ctx.natives, down) ->
+        invoke(Map.fetch!(env.ctx.natives, down), pos, env)
 
-      String.downcase(name) == "queryexecute" ->
-        exec_query(args, env)
+      down == "throw" ->
+        do_throw(pos, named)
+
+      down == "queryexecute" ->
+        exec_query(pos, env)
 
       Collections.handles?(name) ->
-        Collections.call(name, args, invoker(env))
+        Collections.call(name, pos, invoker(env))
 
       true ->
         raise CFException, message: "Undefined function: #{name}"
     end
+  end
+
+  # throw(message=, type=, detail=) or throw("message"); raises a CFException.
+  @spec do_throw([any()], map()) :: no_return()
+  defp do_throw(pos, named) do
+    message = Map.get(named, "message") || List.first(pos) || ""
+    type = Map.get(named, "type", "Application")
+    detail = Map.get(named, "detail", "")
+
+    raise CFException,
+      cf_type: Value.to_str(type),
+      message: Value.to_str(message),
+      detail: Value.to_str(detail)
   end
 
   # A function defined on the currently-executing component (sibling method).
@@ -401,12 +493,12 @@ defmodule ExML.CFScript.Interpreter do
 
   # Call a sibling method: as an instance method when in instance context,
   # otherwise as a static call (preserving the component's static scope).
-  @spec call_sibling(AST.Function.t(), String.t(), [any()], Env.t()) :: any()
-  defp call_sibling(_func, name, args, %Env{this: %Instance{} = instance} = env),
-    do: call_instance_method(instance, name, args, env.ctx)
+  @spec call_sibling(AST.Function.t(), String.t(), [any()], map(), Env.t()) :: any()
+  defp call_sibling(_func, name, pos, named, %Env{this: %Instance{} = instance} = env),
+    do: invoke_method(instance, name, pos, named, env.ctx)
 
-  defp call_sibling(func, _name, args, env),
-    do: call_function(func, args, nil, env.type_path, env.component, env.ctx)
+  defp call_sibling(func, _name, pos, named, env),
+    do: call_function(func, pos, named, nil, env.type_path, env.component, env.ctx)
 
   # queryExecute(sql [, params [, options]]). The actual SQL runs through the
   # pluggable Context.query_executor (e.g. an Ecto repo, when wired into a host
@@ -464,12 +556,13 @@ defmodule ExML.CFScript.Interpreter do
   @spec call_function(
           AST.Function.t(),
           [any()],
+          map(),
           Instance.t() | nil,
           String.t(),
           AST.Component.t(),
           Context.t()
         ) :: any()
-  defp call_function(%AST.Function{} = func, args, instance, type_path, component, ctx) do
+  defp call_function(%AST.Function{} = func, pos, named, instance, type_path, component, ctx) do
     variables = if instance, do: instance.variables, else: Scope.new()
     arguments = Scope.new()
 
@@ -485,7 +578,7 @@ defmodule ExML.CFScript.Interpreter do
       ctx: ctx
     }
 
-    bind_params(func.params, args, arguments, base_env)
+    bind_params(func.params, pos, named, arguments, base_env)
     run_body(func.body, base_env)
   end
 
@@ -529,15 +622,21 @@ defmodule ExML.CFScript.Interpreter do
     Enum.each(stmts, &eval_stmt(&1, env))
   end
 
-  # Bind positional args to params (with defaults / required checks) into `scope`.
-  @spec bind_params([AST.Param.t()], [any()], Scope.t(), Env.t()) :: :ok
-  defp bind_params(params, args, scope, env) do
+  # Bind positional, then named, then default args into the arguments `scope`
+  # (positional by index; named by param name, case-insensitively).
+  @spec bind_params([AST.Param.t()], [any()], map(), Scope.t(), Env.t()) :: :ok
+  defp bind_params(params, pos, named, scope, env) do
     params
     |> Enum.with_index()
     |> Enum.each(fn {%AST.Param{} = param, idx} ->
+      key = String.downcase(param.name)
+
       cond do
-        idx < length(args) ->
-          Scope.put(scope, param.name, Enum.at(args, idx))
+        idx < length(pos) ->
+          Scope.put(scope, param.name, Enum.at(pos, idx))
+
+        Map.has_key?(named, key) ->
+          Scope.put(scope, param.name, Map.fetch!(named, key))
 
         param.default != nil ->
           Scope.put(scope, param.name, eval(param.default, env))
@@ -725,8 +824,19 @@ defmodule ExML.CFScript.Interpreter do
 
   ## Component resolution / loading
 
-  @spec eval_args([tuple()], Env.t()) :: [any()]
-  defp eval_args(args, env), do: Enum.map(args, &eval(&1, env))
+  # Evaluate an argument list into {positional_values, named_value_map}. Named
+  # args (`name = expr`) collect into the map (keyed by downcased name); the
+  # rest are positional, in order.
+  @spec eval_args([tuple()], Env.t()) :: {[any()], map()}
+  defp eval_args(args, env) do
+    Enum.reduce(args, {[], %{}}, fn
+      {:named, name, expr}, {pos, named} ->
+        {pos, Map.put(named, String.downcase(name), eval(expr, env))}
+
+      expr, {pos, named} ->
+        {pos ++ [eval(expr, env)], named}
+    end)
+  end
 
   @spec resolve_component_type(tuple(), Env.t()) :: ComponentType.t()
   defp resolve_component_type(obj_ast, env) do
@@ -741,14 +851,14 @@ defmodule ExML.CFScript.Interpreter do
     %ComponentType{path: path, component: Loader.load(path, ctx)}
   end
 
-  @spec instantiate_path(String.t(), [any()], Env.t()) :: Instance.t()
-  defp instantiate_path(path, args, env) do
+  @spec instantiate_path(String.t(), [any()], map(), Env.t()) :: Instance.t()
+  defp instantiate_path(path, pos, named, env) do
     component = Loader.load(path, env.ctx)
-    instance = instantiate(component, path, env.ctx)
+    instance = new_instance(component, path)
 
-    # If a constructor with args is needed later, route through init here.
-    if args != [] and function_named(component, "init") do
-      _ = call_instance_method(instance, "init", args, env.ctx)
+    # Run the `init` constructor (with the new-expression's args) if present.
+    if function_named(component, "init") do
+      _ = invoke_method(instance, "init", pos, named, env.ctx)
     end
 
     instance
