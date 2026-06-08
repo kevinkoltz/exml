@@ -194,6 +194,47 @@ defmodule ExML.CFScript.QueryTest do
     assert params == %{"id" => %{"value" => "ABC", "sqltype" => "char"}}
   end
 
+  test "a 3-arity executor receives the query options (e.g. datasource)" do
+    test_pid = self()
+
+    executor = fn _sql, _params, options ->
+      send(test_pid, {:executed, options})
+      %{columns: ["ok"], rows: [[1]]}
+    end
+
+    run(
+      """
+      describe("q", function() {
+        it("threads datasource", function() {
+          queryExecute("SELECT 1", {}, { datasource: "mbx" });
+        });
+      });
+      """,
+      query_executor: executor
+    )
+
+    assert_received {:executed, %{"datasource" => "mbx"}}
+  end
+
+  test "<cfquery datasource=> threads the datasource to the executor" do
+    test_pid = self()
+
+    executor = fn _sql, _params, options ->
+      send(test_pid, {:executed, options})
+      %{columns: ["ok"], rows: [[1]]}
+    end
+
+    # A tag-form query (converted to queryExecute with an options map).
+    ExML.CFScript.Runner.run_spec_source(
+      ~s|component { function run() { <cfquery name="q" datasource="mbx">SELECT 1</cfquery> } }|,
+      "inline.cfc",
+      cfc_root: @cfc_root,
+      query_executor: executor
+    )
+
+    assert_received {:executed, %{"datasource" => "mbx"}}
+  end
+
   test "queryExecute without an executor raises a clear error" do
     summary =
       run("""

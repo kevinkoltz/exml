@@ -305,7 +305,7 @@ defmodule ExML.CFScript.TagConverter do
         case unknown_attr("cfquery", attr_map) do
           nil ->
             {converted_sql, params} = convert_queryparams(sql)
-            call = "queryExecute(#{quoted(converted_sql)}, {#{params}})"
+            call = "queryExecute(#{quoted(converted_sql)}, {#{params}}#{query_options(attr_map)})"
 
             case Map.get(attr_map, "name") do
               nil -> "#{call};"
@@ -318,6 +318,17 @@ defmodule ExML.CFScript.TagConverter do
 
       pad_to(statement, whole)
     end)
+  end
+
+  # The `queryExecute` options arg, carrying `datasource` so a host executor can
+  # route to the right repo. Empty (no 3rd arg) when there's no datasource, to
+  # keep the common case unchanged.
+  @spec query_options(%{optional(String.t()) => String.t() | nil}) :: String.t()
+  defp query_options(attrs) do
+    case Map.get(attrs, "datasource") do
+      ds when is_binary(ds) and ds != "" -> ", {datasource: #{attr_expr(ds)}}"
+      _ -> ""
+    end
   end
 
   # Replace each `<cfqueryparam value="#x#" cfsqltype="cf_sql_int">` with a named

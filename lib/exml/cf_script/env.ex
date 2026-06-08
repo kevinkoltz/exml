@@ -71,7 +71,10 @@ defmodule ExML.CFScript.Context do
           cache: pid(),
           natives: %{optional(String.t()) => ExML.CFScript.Value.Native.t()},
           null_support: boolean(),
-          query_executor: (String.t(), any() -> query_result()) | nil,
+          query_executor:
+            (String.t(), any() -> query_result())
+            | (String.t(), any(), map() -> query_result())
+            | nil,
           http_executor: (http_request() -> map()) | nil,
           output: pid() | nil,
           template_root: String.t() | nil,

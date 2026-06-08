@@ -972,7 +972,7 @@ defmodule ExML.CFScript.Interpreter do
     params = Collections.deep_deref(Enum.at(args, 1, %{}))
     options = Collections.deep_deref(Enum.at(args, 2, %{}))
 
-    query = Query.from_result(executor.(sql, params))
+    query = Query.from_result(run_executor(executor, sql, params, options))
 
     case options |> Struct.get("returntype") |> normalize_return_type() do
       "array" ->
@@ -981,6 +981,16 @@ defmodule ExML.CFScript.Interpreter do
       _ ->
         Heap.new_query(query)
     end
+  end
+
+  # The query executor may be `(sql, params)` or `(sql, params, options)` — the
+  # 3-arity form receives the `<cfquery>` options (e.g. `datasource`) so a host
+  # can route to different repos. We support both to stay backward-compatible.
+  @spec run_executor((... -> map()), String.t(), any(), map()) :: map()
+  defp run_executor(executor, sql, params, options) do
+    if is_function(executor, 3),
+      do: executor.(sql, params, options),
+      else: executor.(sql, params)
   end
 
   @spec no_executor() :: no_return()

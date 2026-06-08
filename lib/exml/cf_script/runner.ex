@@ -42,9 +42,11 @@ defmodule ExML.CFScript.Runner do
       These would normally be set by the Application.cfc request lifecycle, which
       the interpreter does not run.
     * `:query_executor` — `(sql, params) -> %{columns:, rows:}` backing
-      `<cfquery>`/`queryExecute`. Pass `:stub` to use a no-op that returns an
-      empty result set without touching any database — useful for exercising the
-      language without a live DB. Omitted entirely, a query raises.
+      `<cfquery>`/`queryExecute`. May also be `(sql, params, options) -> ...`; the
+      3-arity form receives the query options (e.g. `%{"datasource" => "mbx"}`)
+      so a host can route to different repos. Pass `:stub` to use a no-op that
+      returns an empty result set without touching any database — useful for
+      exercising the language without a live DB. Omitted entirely, a query raises.
     * `:http_executor` — `(request) -> response` backing `<cfhttp>` / the
       cfscript `cfhttp(...) { cfhttpparam }` form, where `request` is
       `%{method:, url:, params:, options:}`. Pass `:stub` for a no-op that
