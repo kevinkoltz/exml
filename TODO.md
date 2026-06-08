@@ -37,11 +37,17 @@ actually *implement* these rather than mark them:
   (`name = new X()`); other object types (java/com) are markers.
 - [x] **Top-level (pseudo-constructor) tags** — component-body tags outside any
   function are now converted too (e.g. `<cfobject>`/`<cfset>` memoization).
-- [x] **Side-effect / IO tags & `<cfmodule>`** — `<cffile>`, `<cfhttp>`,
-  `<cfthread>`, `<cfftp>`, `<cfmodule>` (custom tags), ... become per-statement
+- [x] **Side-effect / IO tags & `<cfmodule>`** — `<cffile>`, `<cfthread>`,
+  `<cfftp>`, `<cfmodule>` (custom tags), ... become per-statement
   `exml.unsupported` markers, so the function loads and only the IO line raises.
-  Genuinely *running* these (filesystem/network/custom-tag templates) is out of
-  scope for the interpreter.
+  Genuinely *running* these (filesystem/custom-tag templates) is out of scope.
+- [x] **`cfhttp` (script-tag-block form)** — `cfhttp(attrs) { cfhttpparam... }`
+  parses to `{:script_tag, call, body}`; the interpreter builds a
+  `%{method:, url:, params:, options:}` request from the attributes + the
+  `cfhttpparam` children and runs it through a pluggable `:http_executor`
+  (mirrors `:query_executor`), binding a response struct to `result` (or
+  `cfhttp`). exml stays dependency-free — the host wires `Req`; tests use the
+  `:stub` executor. Other script-tags (transaction/lock/thread) run their body.
 - [x] **`cfc.x = createObject(...)` namespace-cache pattern** — `cfc.x` member
   access/assignment now uses a `cfc` cache struct in the variables scope (the
   CFML memoization idiom), while `new cfc.X()` / `cfc.X::m` still use the path,
@@ -67,9 +73,10 @@ actually *implement* these rather than mark them:
 - [ ] **Timezone-aware `dateConvert`** — dates are timezone-naive today.
 - [ ] **Wider BIF coverage** — add string/date/list/struct/math BIFs as specs
   require them. Done: `writeOutput`/`writeDump`/`dump` (no-ops), `URLEncodedFormat`.
-  Still missing (seen in the sweep): `structDebug`/`structGet`, and the cfscript
-  *function* forms of IO tags (`cfhttp(...)`, etc. — distinct from the `<cfhttp>`
-  tag the converter already markerizes).
+  Note: the sweep's `structDebug`/`structGet` errors were **not** missing BIFs —
+  they were struct member-calls (`request.user.get_emp_no()`,
+  `logger.debug = function(){}`) mis-dispatched to `"struct" <> name` builtins;
+  fixed by invoking a `Closure` stored in a struct key (commit 22fcba0).
 - [x] **Parameter `:` default + static-member reads** — `boolean flag: false`
   (Lucee's colon default) parses; `cfc.X::CONSTANT` reads a static value.
 

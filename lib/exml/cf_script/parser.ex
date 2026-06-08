@@ -465,6 +465,12 @@ defmodule ExML.CFScript.Parser do
       [{:op, op, _} | rest] when op in ["++", "--"] ->
         {{:incr, target, String.first(op)}, rest}
 
+      # Script-tag-block syntax: `cfhttp(attrs) { cfhttpparam(...); ... }` — a
+      # call immediately followed by a `{ }` block (Lucee's tag-in-script form).
+      [{:op, "{", _} | _] when elem(target, 0) == :call ->
+        {body, rest} = parse_block_or_statement(rest)
+        {{:script_tag, target, body}, rest}
+
       _ ->
         {{:expr, target}, rest}
     end

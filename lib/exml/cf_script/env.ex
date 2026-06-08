@@ -54,12 +54,14 @@ defmodule ExML.CFScript.Context do
   """
 
   @type query_result :: %{columns: [String.t()], rows: [[any()]]}
+  @type http_request :: %{method: String.t(), url: String.t(), params: [map()], options: map()}
   @type t :: %__MODULE__{
           cfc_root: String.t(),
           cache: pid(),
           natives: %{optional(String.t()) => ExML.CFScript.Value.Native.t()},
           null_support: boolean(),
           query_executor: (String.t(), any() -> query_result()) | nil,
+          http_executor: (http_request() -> map()) | nil,
           scopes: %{optional(String.t()) => reference()}
         }
 
@@ -76,10 +78,15 @@ defmodule ExML.CFScript.Context do
   # `application`, `cgi`, ...) as mutable `Scope` refs, seeded by the host —
   # since the interpreter does not run the `Application.cfc` request lifecycle
   # that would normally populate them. (`client`/`session` are not modelled.)
+  # `http_executor` backs `<cfhttp>` / the cfscript `cfhttp(...) { cfhttpparam }`
+  # form: a function `(%{method:, url:, params:, options:}) -> response map`. When
+  # nil, an HTTP call raises — the standalone library has no HTTP client; a host
+  # (e.g. the Phoenix app) injects a `Req`-backed one.
   defstruct cfc_root: nil,
             cache: nil,
             natives: %{},
             null_support: false,
             query_executor: nil,
+            http_executor: nil,
             scopes: %{}
 end

@@ -45,6 +45,22 @@ defmodule ExML.CFScript.Runner do
       `<cfquery>`/`queryExecute`. Pass `:stub` to use a no-op that returns an
       empty result set without touching any database — useful for exercising the
       language without a live DB. Omitted entirely, a query raises.
+    * `:http_executor` — `(request) -> response` backing `<cfhttp>` / the
+      cfscript `cfhttp(...) { cfhttpparam }` form, where `request` is
+      `%{method:, url:, params:, options:}`. Pass `:stub` for a no-op that
+      returns a canned 200 echoing the request. Omitted entirely, a cfhttp raises.
+      The standalone library has no HTTP client; a host (e.g. the Phoenix app)
+      injects a `Req`-backed one, returning a CFML-shaped response struct:
+
+          http_executor: fn %{method: m, url: url, params: params} ->
+            resp = Req.request!(method: m, url: url, params: url_params(params))
+            %{
+              "statusCode" => "\#{resp.status} \#{Plug.Conn.Status.reason_phrase(resp.status)}",
+              "status_code" => resp.status,
+              "fileContent" => resp.body,
+              "responseHeader" => Map.new(resp.headers)
+            }
+          end
   """
   @spec run_spec_file(String.t(), keyword()) :: summary()
   def run_spec_file(spec_path, opts) do
@@ -65,6 +81,7 @@ defmodule ExML.CFScript.Runner do
       natives: build_natives(),
       null_support: Keyword.get(opts, :null_support, false),
       query_executor: resolve_executor(Keyword.get(opts, :query_executor)),
+      http_executor: resolve_http_executor(Keyword.get(opts, :http_executor)),
       scopes: build_scopes(Keyword.get(opts, :scopes, %{}))
     }
 
@@ -104,6 +121,25 @@ defmodule ExML.CFScript.Runner do
   @spec resolve_executor(any()) :: (String.t(), any() -> map()) | nil
   defp resolve_executor(:stub), do: fn _sql, _params -> %{columns: [], rows: []} end
   defp resolve_executor(other), do: other
+
+  # `:stub` -> a no-op HTTP executor returning a canned 200 response (no network);
+  # echoes the request so specs can assert on what was sent. Any other value
+  # (a function or nil) passes through unchanged.
+  @spec resolve_http_executor(any()) :: (map() -> map()) | nil
+  defp resolve_http_executor(:stub) do
+    fn request ->
+      %{
+        "statusCode" => "200 OK",
+        "status_code" => 200,
+        "fileContent" => "",
+        "errorDetail" => "",
+        "responseHeader" => %{},
+        "request" => request
+      }
+    end
+  end
+
+  defp resolve_http_executor(other), do: other
 
   @spec summarize([result()]) :: summary()
   defp summarize(results) do

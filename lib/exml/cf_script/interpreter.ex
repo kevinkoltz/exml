@@ -161,6 +161,18 @@ defmodule ExML.CFScript.Interpreter do
     raise CFException, cf_type: "exml.unsupported", message: reason
   end
 
+  # Script-tag-block form `cfhttp(attrs) { cfhttpparam... }`. cfhttp routes to
+  # the host HTTP executor; other script-tags (transaction/lock/thread/...) are
+  # wrappers whose body just runs.
+  defp eval_stmt({:script_tag, {:call, {:var, name}, args}, body}, env) do
+    case String.downcase(name) do
+      "cfhttp" -> exec_cfhttp(args, body, env)
+      _ -> Enum.each(body, &eval_stmt(&1, env))
+    end
+  end
+
+  defp eval_stmt({:script_tag, _call, body}, env), do: Enum.each(body, &eval_stmt(&1, env))
+
   defp eval_stmt({:return, nil}, _env), do: throw({:return, nil})
   defp eval_stmt({:return, expr}, env), do: throw({:return, eval(expr, env)})
 
@@ -748,6 +760,46 @@ defmodule ExML.CFScript.Interpreter do
   # Phoenix app); without one configured it raises. options.returnType selects
   # "query" (default, a QueryRef) or "array" (an array of row structs).
   @spec exec_query([any()], Env.t()) :: any()
+  # cfhttp: build a request from the tag's named attributes + its
+  # `cfhttpparam(...)` children, run it through the host HTTP executor, and bind
+  # the response struct to `result` (or `cfhttp` by default).
+  @spec exec_cfhttp([tuple()], [tuple()], Env.t()) :: any()
+  defp exec_cfhttp(args, body, env) do
+    {_pos, attrs} = eval_args(args, env)
+
+    request = %{
+      method: attrs |> Map.get("method", "GET") |> Value.to_str() |> String.upcase(),
+      url: attrs |> Map.get("url", "") |> Value.to_str(),
+      params: collect_http_params(body, env),
+      options: Map.new(attrs, fn {k, v} -> {k, Collections.deep_deref(v)} end)
+    }
+
+    response = run_http(request, env)
+    result_var = Map.get(attrs, "result") || "cfhttp"
+    assign({:var, Value.to_str(result_var)}, Heap.new_struct(response), env)
+    response
+  end
+
+  # Each `cfhttpparam(name=, value=, type=)` child as a deref'd plain map.
+  @spec collect_http_params([tuple()], Env.t()) :: [map()]
+  defp collect_http_params(body, env) do
+    for {:line, _l, {:expr, {:call, {:var, fn_name}, param_args}}} <- body,
+        String.downcase(fn_name) == "cfhttpparam" do
+      {_pos, named} = eval_args(param_args, env)
+      Map.new(named, fn {k, v} -> {k, Collections.deep_deref(v)} end)
+    end
+  end
+
+  @spec run_http(map(), Env.t()) :: map()
+  defp run_http(_request, %Env{ctx: %Context{http_executor: nil}}) do
+    raise CFException,
+      cf_type: "exml.unsupported",
+      message:
+        "cfhttp requires a configured http executor; run from a host app or pass :http_executor"
+  end
+
+  defp run_http(request, %Env{ctx: %Context{http_executor: executor}}), do: executor.(request)
+
   defp exec_query(args, %Env{ctx: ctx}) do
     executor = ctx.query_executor || no_executor()
     sql = Value.to_str(Enum.at(args, 0))
