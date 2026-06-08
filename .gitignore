@@ -25,3 +25,6 @@ exml-*.tar
 /.elixir_ls/
 # Local Lucee source clone, kept for 1:1 reference (not part of the library)
 /Lucee/
+
+# Local clone of the Surface library (reference only)
+surface/
