@@ -133,6 +133,29 @@ defmodule ExML.CFScript.RendererTest do
     end
   end
 
+  describe "ahead-of-time compile (compile_cfm + render_cfm_ast)" do
+    test "parse-then-escape-then-render matches direct rendering (the engine path)" do
+      src = "<p>Hi <cfoutput>#name#</cfoutput></p>"
+      # Mirror a Phoenix.Template engine: parse at compile time, embed via
+      # Macro.escape, render the recovered AST at runtime.
+      ast = CFScript.compile_cfm(src, "x.cfm")
+      {recovered, _} = Code.eval_quoted(Macro.escape(ast))
+      out = CFScript.render_cfm_ast(recovered, assigns: %{name: "Kev"}) |> IO.iodata_to_binary()
+      assert out == "<p>Hi Kev</p>"
+    end
+
+    test "a recoverable syntax error compiles to an unsupported marker (the Mix compiler gates it)" do
+      # compile_cfm uses the parser's statement-level recovery, so a bad statement
+      # does not raise here — it becomes an {:unsupported, _} node. The :cfml Mix
+      # compiler (ExML.CFScript.validate_cfm) is what turns that into a build
+      # error; rendering it would raise at runtime.
+      ast = CFScript.compile_cfm("<cfset x = >", "bad.cfm")
+      assert [diag] = CFScript.validate_cfm("<cfset x = >", "bad.cfm")
+      assert diag.severity == :error and diag.kind == :syntax
+      assert is_list(ast)
+    end
+  end
+
   describe "real self-contained Signal pages" do
     test "403-style pure HTML page" do
       html = ~s|<div><p>Sorry, you do not have permission.</p></div>|
