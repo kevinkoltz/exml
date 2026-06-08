@@ -21,6 +21,7 @@ defmodule ExML.CFScript.Interpreter do
     Heap,
     Loader,
     NativeObject,
+    OutputBuffer,
     Query,
     Scope,
     Struct,
@@ -38,8 +39,9 @@ defmodule ExML.CFScript.Interpreter do
     StructRef
   }
 
-  # Call-frame scopes (held on the Env).
-  @scopes ~w(arguments local variables this static)
+  # Call-frame scopes (held on the Env). `attributes`/`caller` are populated only
+  # inside a `<cfmodule>` custom tag.
+  @scopes ~w(arguments local variables this static attributes caller)
 
   # Run-wide predefined CFML scopes (held on Context.scopes), normally populated
   # by the Application.cfc request lifecycle, which we don't run — the host seeds
@@ -98,6 +100,34 @@ defmodule ExML.CFScript.Interpreter do
   @spec call_instance_method(Instance.t(), String.t(), [any()], Context.t()) :: any()
   def call_instance_method(%Instance{} = instance, name, args, ctx) do
     invoke_method(instance, name, args, %{}, ctx)
+  end
+
+  @doc """
+  Render a parsed `.cfm` template body (a free-form statement list) for output.
+
+  Runs the statements top-to-bottom against a fresh page `variables` scope, with
+  output going to `ctx.output`. Not a component/method call — there is no
+  `this`/component. A top-level `return`/abort just stops rendering.
+  """
+  @spec run_template([tuple()], Context.t(), Scope.t(), String.t() | nil) :: :ok
+  def run_template(stmts, %Context{} = ctx, variables, template_dir) do
+    env = %Env{
+      arguments: Scope.new(),
+      local: Scope.new(),
+      variables: variables,
+      this: nil,
+      default_scope: :variables,
+      static_scope: nil,
+      component: nil,
+      type_path: nil,
+      template_dir: template_dir,
+      ctx: ctx
+    }
+
+    Enum.each(stmts, &eval_stmt(&1, env))
+    :ok
+  catch
+    {:return, _value} -> :ok
   end
 
   # Instance method call with positional + named arguments.
@@ -684,6 +714,26 @@ defmodule ExML.CFScript.Interpreter do
       down == "createobject" ->
         create_object(pos, env)
 
+      # Page output (`.cfm` rendering): append to the output buffer. A no-op when
+      # no buffer is configured (the spec-runner case), preserving prior behavior.
+      down in ["writeoutput", "writedump", "dump"] ->
+        do_write_output(down, pos, env)
+
+      down == "cfcontent" ->
+        do_cfcontent(named, env)
+
+      # `<cfinclude>` / `<cfmodule>` markers emitted by the template converter.
+      down == "__exml_include" ->
+        do_include(pos, env)
+
+      down == "__exml_module" ->
+        do_module(pos, env)
+
+      # `<cfloop query=>` / `<cfoutput query=>`: a query's rows as an array of row
+      # structs, so the converter can `for (q in __exml_rows(q)) { … #q.col# … }`.
+      down == "__exml_rows" ->
+        query_rows(pos)
+
       # Marker emitted by the tag converter for a tag/attribute it can't support.
       down == "__exml_unsupported" ->
         raise CFException,
@@ -702,6 +752,122 @@ defmodule ExML.CFScript.Interpreter do
       true ->
         raise CFException, message: "Undefined function: #{name}"
     end
+  end
+
+  # writeOutput(text...) appends to the page buffer; writeDump/dump are no-ops
+  # for now (no HTML dump rendering). With no buffer configured it's a no-op,
+  # returning "" so a concatenating caller still works.
+  @spec do_write_output(String.t(), [any()], Env.t()) :: String.t()
+  defp do_write_output(_name, _pos, %Env{ctx: %Context{output: nil}}), do: ""
+
+  defp do_write_output("writeoutput", pos, %Env{ctx: %Context{output: buf}}) do
+    Enum.each(pos, fn v -> OutputBuffer.append(buf, Value.to_str(v)) end)
+    ""
+  end
+
+  defp do_write_output(_dump, _pos, _env), do: ""
+
+  # cfcontent(reset=, type=): clear the buffer and/or set the response
+  # content-type. A no-op without a buffer.
+  @spec do_cfcontent(map(), Env.t()) :: String.t()
+  defp do_cfcontent(_named, %Env{ctx: %Context{output: nil}}), do: ""
+
+  defp do_cfcontent(named, %Env{ctx: %Context{output: buf}}) do
+    if Value.truthy?(Map.get(named, "reset", false)), do: OutputBuffer.reset(buf)
+
+    case Map.get(named, "type") do
+      nil -> :ok
+      type -> OutputBuffer.put_content_type(buf, Value.to_str(type))
+    end
+
+    ""
+  end
+
+  # <cfinclude template="..."> — render the included file into the SAME buffer
+  # and scopes as the including page (a missing file raises loudly via File.read!).
+  # The included body sees `template_dir` set to its own directory so nested
+  # relative includes resolve correctly.
+  @spec do_include([any()], Env.t()) :: String.t()
+  defp do_include([path | _], env) do
+    file = resolve_template_path(Value.to_str(path), env)
+    stmts = Loader.load_template(file, env.ctx)
+    inner = %{env | template_dir: Path.dirname(file)}
+    Enum.each(stmts, &eval_stmt(&1, inner))
+    ""
+  end
+
+  # <cfmodule template="..." a=1 ...> — invoke a custom tag. Like an include but
+  # with custom-tag scoping that matches Lucee 1:1 (verified against Lucee's
+  # CallerImpl): a *fresh, isolated* `variables`/`local`/`arguments` (the tag
+  # cannot see the caller's variables via unscoped reads — only the global
+  # request/application/cgi/url/form scopes, which are shared via ctx), an
+  # `attributes` scope of the passed attributes, and a `caller` scope that *is*
+  # the invoking page's `variables` ref (so `caller.x` reads/writes the parent).
+  # Shares the output buffer. `enclosing: []` (default) blocks closure leakage.
+  @spec do_module([any()], Env.t()) :: String.t()
+  defp do_module([path, attrs | _], env) do
+    file = resolve_template_path(Value.to_str(path), env)
+    stmts = Loader.load_template(file, env.ctx)
+
+    inner = %Env{
+      arguments: Scope.new(),
+      local: Scope.new(),
+      variables: Scope.new(),
+      this: nil,
+      default_scope: :variables,
+      static_scope: nil,
+      component: nil,
+      type_path: nil,
+      template_dir: Path.dirname(file),
+      attributes: Scope.new(Collections.deep_deref(attrs)),
+      caller: env.variables,
+      ctx: env.ctx
+    }
+
+    Enum.each(stmts, &eval_stmt(&1, inner))
+    ""
+  end
+
+  defp do_module([path], env), do: do_module([path, Heap.new_struct(%{})], env)
+
+  # A query's rows as an array of row structs (for the query-loop forms).
+  @spec query_rows([any()]) :: ArrayRef.t()
+  defp query_rows([%QueryRef{} = ref | _]) do
+    ref
+    |> Heap.deref()
+    |> Query.to_array()
+    |> Enum.map(&Heap.new_struct/1)
+    |> Heap.new_array()
+  end
+
+  defp query_rows([other | _]) do
+    raise CFException,
+      message: "cfloop/cfoutput query= expects a query, got #{Value.display(other)}"
+  end
+
+  # Resolve a `.cfm` template path: absolute (`/foo.cfm`) against the configured
+  # web root (`template_root`); relative against the current file's directory
+  # (`template_dir`). A required base that isn't configured raises loudly.
+  @spec resolve_template_path(String.t(), Env.t()) :: String.t()
+  defp resolve_template_path("/" <> rest, %Env{ctx: %Context{template_root: root}} = _env)
+       when is_binary(root) do
+    Path.join(root, rest)
+  end
+
+  defp resolve_template_path("/" <> _ = path, _env) do
+    raise CFException,
+      cf_type: "exml.unsupported",
+      message: "absolute template #{path} requires a configured template_root"
+  end
+
+  defp resolve_template_path(path, %Env{template_dir: dir}) when is_binary(dir) do
+    Path.join(dir, path)
+  end
+
+  defp resolve_template_path(path, _env) do
+    raise CFException,
+      cf_type: "exml.unsupported",
+      message: "relative template #{path} requires a known template_dir"
   end
 
   # throw(message=, type=, detail=) or throw("message" [, "type" [, "detail"]]);
@@ -1103,6 +1269,8 @@ defmodule ExML.CFScript.Interpreter do
   defp scope_ref("local", env), do: env.local
   defp scope_ref("variables", env), do: env.variables
   defp scope_ref("static", env), do: env.static_scope
+  defp scope_ref("attributes", env), do: env.attributes
+  defp scope_ref("caller", env), do: env.caller
 
   # Predefined run-wide scopes (request/application/cgi/...) live on the context.
   defp scope_ref(name, env) do

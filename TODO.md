@@ -3,6 +3,32 @@
 Roadmap for the cfscript interpreter (`lib/exml/cf_script`). Items are grouped
 by area and roughly ordered by impact within each group.
 
+## `.cfm` template rendering (Phoenix)
+
+Milestone 1 (self-contained pages) is implemented: render `.cfm` to iodata via
+`ExML.CFScript.render_cfm/2` (`Renderer` + `OutputBuffer` + `TemplateConverter`).
+Covers literal text, `<cfoutput>`/`#expr#`, `<cfscript>`,
+`<cfif>/<cfloop>/<cfswitch>/<cfset>/<cfparam>`, `<cfquery>` + query-row loops
+(`<cfloop query=>`/`<cfoutput query=>`), `<cfinclude>` (runtime, relative to the
+file dir / web root), and `<cfmodule template=>` with Lucee-1:1 custom-tag
+scoping (isolated `variables`, `attributes`, `caller`). Unhandled tags / missing
+includes crash loudly.
+
+- [ ] **Phoenix.Template engine (host side)** — a `Phoenix.Template.Engine`
+  whose `compile/2` parses the `.cfm` (compile-time) and emits
+  `{:safe, Renderer.render_ast(ast, assigns: …)}`. Lives in the host (hapi); exml
+  stays dependency-free. Requires exml `runtime: true` in the prod build.
+- [ ] **`<cfmodule name=>` / `<cf_*>` custom tags** — name-based resolution
+  against a configured customtags root (currently a loud marker).
+- [ ] **Paired custom tags** — a `<cfmodule>` with a body / `thisTag` start+end
+  execution (currently out of scope).
+- [ ] **Bare query-column access** — `<cfloop query="q">#col#</cfloop>` (unscoped
+  column) needs the row columns injected into scope; today only `#q.col#`
+  (scoped) resolves, bare refs crash loudly.
+- [ ] **`Application.cfc` request/auth/session lifecycle** — not run; unseeded
+  `request`/`session`/`application` reads crash loudly (intended for partial
+  migration).
+
 ## Parser / language features
 
 - [x] **Statement-level parse recovery** — an unparseable statement becomes an

@@ -7,7 +7,7 @@ defmodule ExML.CFScript do
   runner and `ExML.CFScript.Parser` for the supported grammar.
   """
 
-  alias ExML.CFScript.Runner
+  alias ExML.CFScript.{Renderer, Runner}
 
   @doc """
   Run a CFML test spec file and return a summary map
@@ -18,4 +18,12 @@ defmodule ExML.CFScript do
   """
   @spec run_spec(String.t(), keyword()) :: Runner.summary()
   defdelegate run_spec(spec_path, opts), to: Runner, as: :run_spec_file
+
+  @doc """
+  Render a `.cfm` template string to output iodata. See `ExML.CFScript.Renderer`
+  for options (`:assigns`, `:url`/`:form`, `:template_dir`/`:template_root`,
+  `:query_executor`, ...).
+  """
+  @spec render_cfm(String.t(), keyword()) :: iodata()
+  defdelegate render_cfm(source, opts \\ []), to: Renderer, as: :render_source
 end

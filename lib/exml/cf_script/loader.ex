@@ -22,7 +22,7 @@ defmodule ExML.CFScript.Loader do
 
   require Logger
 
-  alias ExML.CFScript.{AST, Context, Lexer, Parser, TagConverter}
+  alias ExML.CFScript.{AST, Context, Lexer, Parser, TagConverter, TemplateConverter}
 
   @doc """
   Load and parse the component at `path` (e.g. `"cfc.common"`), using the
@@ -77,6 +77,38 @@ defmodule ExML.CFScript.Loader do
       static_init: static_init,
       init: init
     }
+  end
+
+  @doc """
+  Parse `.cfm` *template* source into a free-form statement list (the render
+  body) — not a component. The template is converted to a `writeOutput`-emitting
+  cfscript body by `TemplateConverter`, then lexed and parsed.
+  """
+  @spec parse_template_source(String.t(), String.t()) :: [tuple()]
+  def parse_template_source(source, _label \\ "<template>") do
+    source
+    |> TemplateConverter.convert()
+    |> Lexer.tokenize_lines()
+    |> Parser.parse_statements_from_tokens()
+  end
+
+  @doc """
+  Load and parse a `.cfm` template file, caching the parsed body on the context
+  (so a repeatedly-included partial is parsed once). A missing file raises.
+  """
+  @spec load_template(String.t(), Context.t()) :: [tuple()]
+  def load_template(file, %Context{cache: cache}) do
+    key = {:template, file}
+
+    case Agent.get(cache, &Map.get(&1, key)) do
+      nil ->
+        stmts = parse_template_source(File.read!(file), file)
+        Agent.update(cache, &Map.put(&1, key, stmts))
+        stmts
+
+      stmts ->
+        stmts
+    end
   end
 
   # Tag conversion rewrites the source and shifts lines, so the parsed AST can't

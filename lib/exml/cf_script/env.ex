@@ -14,6 +14,11 @@ defmodule ExML.CFScript.Env do
     * `type_path`  — the component's path (keys its static scope)
     * `enclosing`  — captured `local` scopes of lexically-enclosing functions
       (a closure can read its defining function's locals); innermost first
+    * `template_dir` — directory of the `.cfm` file currently rendering, so a
+      relative `<cfinclude>`/`<cfmodule>` resolves against the right folder
+    * `attributes` — a custom tag's (`<cfmodule>`) `attributes` scope (else nil)
+    * `caller`     — a custom tag's `caller` scope: the *invoking* page's
+      `variables` ref, so the tag can read/write `caller.*` (else nil)
     * `ctx`       — `ExML.CFScript.Context`, shared across the whole run
   """
 
@@ -29,6 +34,9 @@ defmodule ExML.CFScript.Env do
           component: term(),
           type_path: String.t() | nil,
           enclosing: [Scope.t()],
+          template_dir: String.t() | nil,
+          attributes: Scope.t() | nil,
+          caller: Scope.t() | nil,
           ctx: term()
         }
 
@@ -42,6 +50,9 @@ defmodule ExML.CFScript.Env do
     :component,
     :type_path,
     {:enclosing, []},
+    :template_dir,
+    :attributes,
+    :caller,
     :ctx
   ]
 end
@@ -62,6 +73,8 @@ defmodule ExML.CFScript.Context do
           null_support: boolean(),
           query_executor: (String.t(), any() -> query_result()) | nil,
           http_executor: (http_request() -> map()) | nil,
+          output: pid() | nil,
+          template_root: String.t() | nil,
           scopes: %{optional(String.t()) => reference()}
         }
 
@@ -82,11 +95,21 @@ defmodule ExML.CFScript.Context do
   # form: a function `(%{method:, url:, params:, options:}) -> response map`. When
   # nil, an HTTP call raises — the standalone library has no HTTP client; a host
   # (e.g. the Phoenix app) injects a `Req`-backed one.
+  #
+  # `output` is the `ExML.CFScript.OutputBuffer` pid backing `.cfm` template
+  # rendering — `writeOutput`/literal text/`<cfoutput>` append to it. When nil
+  # (the spec-runner case), `writeOutput` is a no-op, as before.
+  #
+  # `template_root` is the web root (`SignalWeb`) that absolute `<cfinclude
+  # template="/...">` paths resolve against; relative paths use the rendering
+  # file's directory (`Env.template_dir`).
   defstruct cfc_root: nil,
             cache: nil,
             natives: %{},
             null_support: false,
             query_executor: nil,
             http_executor: nil,
+            output: nil,
+            template_root: nil,
             scopes: %{}
 end

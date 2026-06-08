@@ -1,0 +1,1 @@
+<footer>shared footer</footer>

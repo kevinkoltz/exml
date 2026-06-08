@@ -1,0 +1,1 @@
+<cfoutput>Hi #attributes.who#</cfoutput><cfset caller.greeted = true>
