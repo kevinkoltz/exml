@@ -7,7 +7,7 @@ defmodule ExML.CFScript do
   runner and `ExML.CFScript.Parser` for the supported grammar.
   """
 
-  alias ExML.CFScript.{Renderer, Runner}
+  alias ExML.CFScript.{Renderer, Runner, Validator}
 
   @doc """
   Run a CFML test spec file and return a summary map
@@ -26,4 +26,16 @@ defmodule ExML.CFScript do
   """
   @spec render_cfm(String.t(), keyword()) :: iodata()
   defdelegate render_cfm(source, opts \\ []), to: Renderer, as: :render_source
+
+  @doc """
+  Validate `.cfc` source ahead of time, returning build-time diagnostics
+  (`%{severity:, kind:, file:, line:, message:}`). Empty list means clean. See
+  `ExML.CFScript.Validator`.
+  """
+  @spec validate_cfc(String.t(), String.t(), keyword()) :: [Validator.diagnostic()]
+  defdelegate validate_cfc(source, file, opts \\ []), to: Validator
+
+  @doc "Validate `.cfm` template source ahead of time. See `ExML.CFScript.Validator`."
+  @spec validate_cfm(String.t(), String.t(), keyword()) :: [Validator.diagnostic()]
+  defdelegate validate_cfm(source, file, opts \\ []), to: Validator
 end

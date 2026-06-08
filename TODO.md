@@ -14,10 +14,18 @@ file dir / web root), and `<cfmodule template=>` with Lucee-1:1 custom-tag
 scoping (isolated `variables`, `attributes`, `caller`). Unhandled tags / missing
 includes crash loudly.
 
+- [x] **Build-time validation API** — `ExML.CFScript.validate_cfc/3` and
+  `validate_cfm/3` (via `Validator` + `Loader.diagnose/3`) return diagnostics
+  (`:syntax` always error; `:unsupported` error-by-default, downgraded by
+  `opts[:allow]` or an inline `@exml-allow` directive). Lets a host fail the build
+  on invalid `.cfm`/`.cfc` instead of crashing lazily at runtime.
 - [ ] **Phoenix.Template engine (host side)** — a `Phoenix.Template.Engine`
   whose `compile/2` parses the `.cfm` (compile-time) and emits
   `{:safe, Renderer.render_ast(ast, assigns: …)}`. Lives in the host (hapi); exml
   stays dependency-free. Requires exml `runtime: true` in the prod build.
+- [ ] **Mix compiler (host side)** — `Mix.Tasks.Compile.Cfml` auto-scans
+  `lib/signal_web` for every `.cfm`/`.cfc`, runs the validator, and fails the
+  build on errors (with an incremental manifest).
 - [ ] **`<cfmodule name=>` / `<cf_*>` custom tags** — name-based resolution
   against a configured customtags root (currently a loud marker).
 - [ ] **Paired custom tags** — a `<cfmodule>` with a body / `thisTag` start+end

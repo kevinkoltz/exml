@@ -92,6 +92,83 @@ defmodule ExML.CFScript.Loader do
     |> Parser.parse_statements_from_tokens()
   end
 
+  @typedoc "A build-time diagnostic from strict validation."
+  @type diagnostic :: %{
+          severity: :error | :warning,
+          kind: :syntax | :unsupported,
+          file: String.t(),
+          line: pos_integer() | nil,
+          message: String.t()
+        }
+
+  @doc """
+  Strictly parse a `.cfc`/`.cfm` source and return `:syntax` diagnostics for any
+  member/statement that fails to parse — instead of the lenient runtime path,
+  which silently skips them. Unsupported-construct markers are detected
+  separately by `ExML.CFScript.Validator` (an AST walk); this catches the
+  whole-chunk parse failures that get *dropped* (and so never appear in the AST).
+  """
+  @spec diagnose(String.t(), String.t(), :cfc | :cfm) :: [diagnostic()]
+  def diagnose(source, file, :cfc) do
+    {_extends, tokens} =
+      source
+      |> preprocess()
+      |> Lexer.tokenize_lines()
+      |> strip_component_wrapper()
+
+    diagnose_members(tokens, file, [])
+  end
+
+  def diagnose(source, file, :cfm) do
+    _ =
+      source
+      |> TemplateConverter.convert()
+      |> Lexer.tokenize_lines()
+      |> Parser.parse_statements_from_tokens()
+
+    []
+  rescue
+    e -> [syntax_diagnostic(file, nil, Exception.message(e))]
+  end
+
+  @spec diagnose_members([Lexer.token()], String.t(), [diagnostic()]) :: [diagnostic()]
+  defp diagnose_members(tokens, file, acc) do
+    case next_member_chunk(tokens) do
+      :done ->
+        Enum.reverse(acc)
+
+      {:function, chunk, rest} ->
+        diagnose_members(rest, file, try_parse_chunk(chunk, file, :function, acc))
+
+      {:static_init, inner, rest} ->
+        diagnose_members(rest, file, try_parse_chunk(inner, file, :statements, acc))
+
+      {:init, chunk, rest} ->
+        diagnose_members(rest, file, try_parse_chunk(chunk, file, :statements, acc))
+    end
+  end
+
+  @spec try_parse_chunk([Lexer.token()], String.t(), :function | :statements, [diagnostic()]) ::
+          [diagnostic()]
+  defp try_parse_chunk(chunk, file, kind, acc) do
+    case kind do
+      :function -> Parser.parse_one_function(chunk)
+      :statements -> Parser.parse_statements_from_tokens(chunk)
+    end
+
+    acc
+  rescue
+    e -> [syntax_diagnostic(file, chunk_line(chunk), Exception.message(e)) | acc]
+  end
+
+  @spec chunk_line([Lexer.token()]) :: pos_integer() | nil
+  defp chunk_line([{_type, _value, line} | _]), do: line
+  defp chunk_line(_), do: nil
+
+  @spec syntax_diagnostic(String.t(), pos_integer() | nil, String.t()) :: diagnostic()
+  defp syntax_diagnostic(file, line, message),
+    do: %{severity: :error, kind: :syntax, file: file, line: line, message: message}
+
   @doc """
   Load and parse a `.cfm` template file, caching the parsed body on the context
   (so a repeatedly-included partial is parsed once). A missing file raises.
