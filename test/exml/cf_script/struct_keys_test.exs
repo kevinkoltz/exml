@@ -22,6 +22,24 @@ defmodule ExML.CFScript.StructKeysTest do
     summary.passed
   end
 
+  test "a struct key holding a function is callable as a method" do
+    assert 1 ==
+             passing(
+               run("""
+               describe("g", function() {
+                 it("invokes the stored closure", function() {
+                   user = { get_emp_no: function() { return 42; }, name: "kev" };
+                   assert_equal(user.get_emp_no(), 42);
+
+                   logger = {};
+                   logger.debug = function(msg) { return "dbg:" & msg; };
+                   assert_equal(logger.debug("hi"), "dbg:hi");
+                 });
+               });
+               """)
+             )
+  end
+
   test "lookup is case-insensitive, iteration preserves original key case" do
     assert 1 ==
              passing(

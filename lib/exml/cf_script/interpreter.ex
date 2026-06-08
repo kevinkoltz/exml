@@ -632,6 +632,17 @@ defmodule ExML.CFScript.Interpreter do
     end
   end
 
+  # A struct key holding a function value is callable: `obj.method(args)` invokes
+  # the stored closure (a common idiom — e.g. `request.user.get_emp_no()` or
+  # `logger.debug = function(){}` then `logger.debug(...)`). Otherwise the member
+  # maps to a struct BIF.
+  defp dispatch_member_call(%StructRef{} = ref, name, pos, _named, env) do
+    case Struct.fetch(Heap.deref(ref), name) do
+      {:ok, %Closure{} = fun} -> invoke(fun, pos, env)
+      _ -> Collections.member_call(ref, name, pos, invoker(env))
+    end
+  end
+
   # Strings, arrays, and structs delegate to the member->BIF/HigherOrder glue,
   # supplying an invoker so callback members can run UDFs (positional only).
   defp dispatch_member_call(value, name, pos, _named, env) do
